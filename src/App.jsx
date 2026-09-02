@@ -209,19 +209,20 @@ function AppContent() {
         const dbUsers = await authService.getAllUsers();
         setUsers(dbUsers.length > 0 ? dbUsers : SEED_USERS);
 
-        // --- NEW: Load Templates from Supabase ---
+        // --- FIXED: Load Templates from Supabase without double-parsing ---
         const { data: dbTemplates } = await supabase.from('fims_templates').select('*');
         if (dbTemplates && dbTemplates.length > 0) {
           const templateMap = {};
           const clientList = [];
           dbTemplates.forEach(t => {
-            templateMap[t.client_name] = JSON.parse(t.sections || '[]');
+            // Supabase returns JSONB as objects, so we just use them directly
+            templateMap[t.client_name] = t.sections || [];
             clientList.push(t.client_name);
           });
           localStorage.setItem('fims_templates', JSON.stringify(templateMap));
           localStorage.setItem('fims_template_clients', JSON.stringify(clientList));
         }
-        // --- End new code ---
+        // --- End fix ---
 
         const { data: dbLocations } = await supabase.from('fims_locations').select('*').order('name', { ascending: true });
         if (dbLocations && dbLocations.length > 0) setLocations(dbLocations);
