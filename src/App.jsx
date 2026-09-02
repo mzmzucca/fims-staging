@@ -209,14 +209,18 @@ function AppContent() {
         const dbUsers = await authService.getAllUsers();
         setUsers(dbUsers.length > 0 ? dbUsers : SEED_USERS);
 
-        // --- FIXED: Load Templates from Supabase without double-parsing ---
+        // --- CORRECTED: Load Templates with full format ---
         const { data: dbTemplates } = await supabase.from('fims_templates').select('*');
         if (dbTemplates && dbTemplates.length > 0) {
           const templateMap = {};
           const clientList = [];
           dbTemplates.forEach(t => {
-            // Supabase returns JSONB as objects, so we just use them directly
-            templateMap[t.client_name] = t.sections || [];
+            // Map to the exact format getClientTemplate expects
+            templateMap[t.client_name] = {
+              sections: t.sections || [],
+              clientName: t.client_name,
+              totalItems: t.total_items || 0
+            };
             clientList.push(t.client_name);
           });
           localStorage.setItem('fims_templates', JSON.stringify(templateMap));
