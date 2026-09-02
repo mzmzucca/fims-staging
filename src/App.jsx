@@ -305,6 +305,8 @@ function AppContent() {
   const handleCreateInspection = (insp) => {
     setInspections(prev => [insp, ...prev]);
     syncInspectionToSupabase(insp);
+    // --- NEW: Notify the inspector ---
+    if(insp.inspector_id) notify(insp.inspector_id, `Nova inspeção criada para ${insp.location_name}.`, "inspections");
     setShowNewModal(false);
     setEditingInspection(insp);
     setPage("inspections");
@@ -319,7 +321,11 @@ function AppContent() {
   const handleCreateSchedule = (tasks) => {
     const tasksWithTemplates = tasks.map(task => { const t = getClientTemplate(task.location_name); return { ...task, items: (t.sections||[]).flatMap(s => (s.items||[]).map(i => ({...i, section_id:s.id, score:null, comment:"", photos:[]}))), sections: (t.sections||[]).map(s => ({id:s.id, observation:"", photos:[]})) }; });
     setInspections(prev => [...tasksWithTemplates, ...prev]);
-    tasksWithTemplates.forEach(t => syncInspectionToSupabase(t));
+    tasksWithTemplates.forEach(t => {
+      syncInspectionToSupabase(t);
+      // --- NEW: Notify the inspector for each scheduled task ---
+      if(t.inspector_id) notify(t.inspector_id, `Nova tarefa agendada para ${t.date} no local ${t.location_name}.`, "schedule");
+    });
     setShowScheduleModal(false);
   };
 
