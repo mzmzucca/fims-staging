@@ -1,6 +1,3 @@
-Here’s the original, unedited `App.jsx` exactly as you first provided it:
-
-```jsx
 // /src/App.jsx
 import { useState, useEffect } from "react";
 import { Icon } from "./lib/icons";
@@ -31,6 +28,7 @@ import { getClientTemplate } from "./utils/excelTemplateImporter";
 import { authService } from "./services/authService";
 import { dataStore } from "./lib/dataStore";
 import { supabase } from "./lib/supabase";
+
 const STORAGE_KEYS = {
   CURRENT_USER: "fims_current_user",
   CURRENT_PAGE: "fims_current_page",
@@ -42,10 +40,12 @@ const STORAGE_KEYS = {
   LOGS: "fims_logs",
   MESSAGES_DRAFT: "fims_messages_draft",
 };
+
 function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }) {
   const [locId, setLocId] = useState("");
   const [inspectorId, setInspectorId] = useState(currentUser.role === ROLES.INSPECTOR ? currentUser.id : "");
   const [selectedClient, setSelectedClient] = useState(null);
+
   const handleLocationChange = (e) => {
     const id = e.target.value;
     setLocId(id);
@@ -56,6 +56,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
       setSelectedClient(null);
     }
   };
+
   const handleCreate = () => {
     if (!locId) return;
     const loc = locations.find(l => l.id === Number(locId));
@@ -105,6 +106,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     };
     onCreate(insp);
   };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
@@ -150,6 +152,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     </div>
   );
 }
+
 function AppContent() {
   const { notify } = useComms();
   
@@ -168,6 +171,7 @@ function AppContent() {
   const [reschedulingTask, setReschedulingTask] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+
   const syncInspectionToSupabase = async (insp) => {
     try {
       await supabase.from('fims_inspections').upsert(insp);
@@ -175,12 +179,16 @@ function AppContent() {
       console.error("Supabase sync error:", err);
     }
   };
+
   useEffect(() => {
     async function loadData() {
       try {
         const dbUsers = await authService.getAllUsers();
-        console.log("USERS FROM SUPABASE:", dbUsers);
         setUsers(dbUsers.length > 0 ? dbUsers : SEED_USERS);
+
+        const { data: dbLocations } = await supabase.from('fims_locations').select('*').order('name', { ascending: true });
+        if (dbLocations && dbLocations.length > 0) setLocations(dbLocations);
+
         const { data: supabaseInspections, error } = await supabase.from('fims_inspections').select('*');
         if (!error && supabaseInspections) {
           setInspections(supabaseInspections);
@@ -189,6 +197,7 @@ function AppContent() {
           const savedInspections = await dataStore.get(STORAGE_KEYS.INSPECTIONS);
           setInspections(savedInspections || genSeedInspections());
         }
+
         const savedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
         const savedPage = localStorage.getItem(STORAGE_KEYS.CURRENT_PAGE);
         if (savedUser) {
@@ -206,10 +215,12 @@ function AppContent() {
     }
     loadData();
   }, []);
+
   useEffect(() => {
     if (!isInitialized) return;
     dataStore.set(STORAGE_KEYS.INSPECTIONS, inspections);
   }, [inspections, isInitialized]);
+
   useEffect(() => { if (currentUser && page) localStorage.setItem(STORAGE_KEYS.CURRENT_PAGE, page); }, [page, currentUser]);
   useEffect(() => {
     if (editingInspection) localStorage.setItem(STORAGE_KEYS.EDITING_INSPECTION, JSON.stringify(editingInspection));
@@ -219,8 +230,10 @@ function AppContent() {
     if (viewingInspection) localStorage.setItem(STORAGE_KEYS.VIEWING_INSPECTION, JSON.stringify(viewingInspection));
     else localStorage.removeItem(STORAGE_KEYS.VIEWING_INSPECTION);
   }, [viewingInspection]);
+
   const alertCount = inspections.filter(i => i.alert_level === "critical" && i.score_pct !== null && !i.resolved).length;
   const addAuditLog = (user, action, type, detail) => setAuditLogs(prev => [{ id: genId(), timestamp: new Date().toISOString(), user: user.name, action, type, detail }, ...prev]);
+
   const handleLogin = (user) => {
     setCurrentUser(user);
     localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
@@ -228,6 +241,7 @@ function AppContent() {
     setPage(savedPage && savedPage !== "login" ? savedPage : "dashboard");
     addAuditLog(user, "Login", "login", "Entrou no sistema");
   };
+
   const handleLogout = async () => {
     if (currentUser) {
       await authService.logout(currentUser.id, currentUser.name);
@@ -239,6 +253,7 @@ function AppContent() {
     setCurrentUser(null);
     setPage("dashboard");
   };
+
   const handleNavigate = (p) => {
     setPage(p);
     setViewingInspection(null);
@@ -285,18 +300,21 @@ function AppContent() {
     syncInspectionToSupabase(updated);
     if (viewingInspection) setViewingInspection(updated);
   };
+
   const handleCreateSchedule = (tasks) => {
     const tasksWithTemplates = tasks.map(task => { const t = getClientTemplate(task.location_name); return { ...task, items: (t.sections||[]).flatMap(s => (s.items||[]).map(i => ({...i, section_id:s.id, score:null, comment:"", photos:[]}))), sections: (t.sections||[]).map(s => ({id:s.id, observation:"", photos:[]})) }; });
     setInspections(prev => [...tasksWithTemplates, ...prev]);
     tasksWithTemplates.forEach(t => syncInspectionToSupabase(t));
     setShowScheduleModal(false);
   };
+
   const handleBulkSchedule = (tasks) => {
     const tasksWithTemplates = tasks.map(task => { const t = getClientTemplate(task.location_name); return { ...task, items: (t.sections||[]).flatMap(s => (s.items||[]).map(i => ({...i, section_id:s.id, score:null, comment:"", photos:[]}))), sections: (t.sections||[]).map(s => ({id:s.id, observation:"", photos:[]})) }; });
     setInspections(prev => [...tasksWithTemplates, ...prev]);
     tasksWithTemplates.forEach(t => syncInspectionToSupabase(t));
     setShowBulkModal(false);
   };
+
   const handleDragUpdate = (updated) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     syncInspectionToSupabase(updated);
@@ -325,11 +343,14 @@ function AppContent() {
     setInspections(prev => [leaveTask, ...prev]);
     syncInspectionToSupabase(leaveTask);
   };
+
   if (!isInitialized) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><div className="spinner"></div></div>;
   if (!currentUser) return <Login onLogin={handleLogin} />;
+
   let pageTitle = topBarTitles[page] || "FIMS";
   if (editingInspection) pageTitle = editingInspection.location_name;
   else if (viewingInspection) pageTitle = viewingInspection.location_name;
+
   return (
     <div className="fims-app">
       <Sidebar currentUser={currentUser} activePage={page} onNavigate={handleNavigate} alertCount={alertCount} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
@@ -374,9 +395,11 @@ function AppContent() {
     </div>
   );
 }
+
 const topBarTitles = {
   dashboard: "Dashboard", inspections: "Inspeções", alerts: "Alertas", reports: "Relatórios", users: "Utilizadores", locations: "Localizações", templates: "Templates", audit: "Auditoria", settings: "Configurações", monthly_report: "Relatório Mensal", schedule: "Operations Calendar", field_map: "Mapa de Campo", team: "Equipa (KPIs)", messages: "Mensagens", report_center: "Centro de Relatórios"
 };
+
 export default function App() {
   return (
     <LangProvider>
@@ -386,4 +409,3 @@ export default function App() {
     </LangProvider>
   );
 }
-```
