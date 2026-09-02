@@ -172,9 +172,32 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
+  // --- UPDATED: safer sync that only sends allowed columns ---
   const syncInspectionToSupabase = async (insp) => {
     try {
-      await supabase.from('fims_inspections').upsert(insp);
+      const safeInsp = {
+        id: insp.id,
+        location_id: insp.location_id,
+        location_name: insp.location_name,
+        inspector_id: insp.inspector_id,
+        inspector_name: insp.inspector_name,
+        supervisor_id: insp.supervisor_id,
+        supervisor_name: insp.supervisor_name,
+        status: insp.status,
+        accepted: insp.accepted,
+        score_pct: insp.score_pct,
+        date: insp.date,
+        items: insp.items,
+        sections: insp.sections,
+        notes: insp.notes,
+        alert_level: insp.alert_level,
+        type: insp.type,
+        priority: insp.priority,
+        template_id: insp.template_id,
+        template_version: insp.template_version
+      };
+      const { error } = await supabase.from('fims_inspections').upsert(safeInsp);
+      if (error) console.error("Supabase inspection sync error:", error.message);
     } catch (err) {
       console.error("Supabase sync error:", err);
     }
@@ -298,14 +321,12 @@ function AppContent() {
     setEditingInspection(null);
     setPage("inspections");
     addAuditLog(currentUser, "Notificação Enviada", "notification", `Email enviado sobre ${updated.location_name}`);
-    // --- CHANGE 1: notify uses updated.supervisor_id instead of hardcoded 3 ---
     notify(updated.supervisor_id, `Nova inspeção submetida por ${currentUser.name} para ${updated.location_name}.`, "inspections");
   };
   
   const handleCreateInspection = (insp) => {
     setInspections(prev => [insp, ...prev]);
     syncInspectionToSupabase(insp);
-    // --- NEW: Notify the inspector ---
     if(insp.inspector_id) notify(insp.inspector_id, `Nova inspeção criada para ${insp.location_name}.`, "inspections");
     setShowNewModal(false);
     setEditingInspection(insp);
@@ -323,7 +344,6 @@ function AppContent() {
     setInspections(prev => [...tasksWithTemplates, ...prev]);
     tasksWithTemplates.forEach(t => {
       syncInspectionToSupabase(t);
-      // --- NEW: Notify the inspector for each scheduled task ---
       if(t.inspector_id) notify(t.inspector_id, `Nova tarefa agendada para ${t.date} no local ${t.location_name}.`, "schedule");
     });
     setShowScheduleModal(false);
@@ -349,7 +369,6 @@ function AppContent() {
     const updated = { ...insp, accepted: true, status: "pending" };
     setInspections(prev => prev.map(i => i.id === insp.id ? updated : i));
     syncInspectionToSupabase(updated);
-    // --- CHANGE 2: notify uses insp.supervisor_id instead of hardcoded 3 ---
     notify(insp.supervisor_id, `${currentUser.name} aceitou a tarefa para ${insp.location_name}.`, "schedule");
   };
   const handleDeclineTask = (insp) => {
@@ -358,7 +377,6 @@ function AppContent() {
     const updated = { ...insp, accepted: false, status: "rejected", decline_reason: reason };
     setInspections(prev => prev.map(i => i.id === insp.id ? updated : i));
     syncInspectionToSupabase(updated);
-    // --- CHANGE 3: notify uses insp.supervisor_id instead of hardcoded 3 ---
     notify(insp.supervisor_id, `⚠️ ${currentUser.name} RECUSOU a tarefa para ${insp.location_name}. Motivo: ${reason}`, "schedule");
   };
   const handleRequestLeave = (user) => {
