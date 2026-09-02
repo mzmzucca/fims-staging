@@ -284,7 +284,8 @@ function AppContent() {
     setEditingInspection(null);
     setPage("inspections");
     addAuditLog(currentUser, "Notificação Enviada", "notification", `Email enviado sobre ${updated.location_name}`);
-    notify(3, `Nova inspeção submetida por ${currentUser.name} para ${updated.location_name}.`, "inspections");
+    // --- CHANGE 1: notify uses updated.supervisor_id instead of hardcoded 3 ---
+    notify(updated.supervisor_id, `Nova inspeção submetida por ${currentUser.name} para ${updated.location_name}.`, "inspections");
   };
   
   const handleCreateInspection = (insp) => {
@@ -328,6 +329,8 @@ function AppContent() {
     const updated = { ...insp, accepted: true, status: "pending" };
     setInspections(prev => prev.map(i => i.id === insp.id ? updated : i));
     syncInspectionToSupabase(updated);
+    // --- CHANGE 2: notify uses insp.supervisor_id instead of hardcoded 3 ---
+    notify(insp.supervisor_id, `${currentUser.name} aceitou a tarefa para ${insp.location_name}.`, "schedule");
   };
   const handleDeclineTask = (insp) => {
     const reason = prompt("Motivo da recusa:", "");
@@ -335,6 +338,8 @@ function AppContent() {
     const updated = { ...insp, accepted: false, status: "rejected", decline_reason: reason };
     setInspections(prev => prev.map(i => i.id === insp.id ? updated : i));
     syncInspectionToSupabase(updated);
+    // --- CHANGE 3: notify uses insp.supervisor_id instead of hardcoded 3 ---
+    notify(insp.supervisor_id, `⚠️ ${currentUser.name} RECUSOU a tarefa para ${insp.location_name}. Motivo: ${reason}`, "schedule");
   };
   const handleRequestLeave = (user) => {
     const date = prompt("Data da folga (AAAA-MM-DD):", new Date().toISOString().split("T")[0]);
