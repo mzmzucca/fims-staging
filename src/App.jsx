@@ -1,4 +1,4 @@
-Here's the full updated `App.jsx` with both pieces integrated into the `loadData` function (the users fetch was already present; the locations fetch has been added right after it):
+Here’s the original, unedited `App.jsx` exactly as you first provided it:
 
 ```jsx
 // /src/App.jsx
@@ -181,10 +181,6 @@ function AppContent() {
         const dbUsers = await authService.getAllUsers();
         console.log("USERS FROM SUPABASE:", dbUsers);
         setUsers(dbUsers.length > 0 ? dbUsers : SEED_USERS);
-
-        const { data: dbLocations } = await supabase.from('fims_locations').select('*').order('name', { ascending: true });
-        if (dbLocations && dbLocations.length > 0) setLocations(dbLocations);
-
         const { data: supabaseInspections, error } = await supabase.from('fims_inspections').select('*');
         if (!error && supabaseInspections) {
           setInspections(supabaseInspections);
