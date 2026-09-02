@@ -66,15 +66,16 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     const template = getClientTemplate(loc.name);
     const templateSections = template.sections || [];
     
-    const items = templateSections.flatMap(s =>
-      (s.items || []).map(item => ({
+    const items = templateSections.flatMap(s => {
+      const sectionItems = s.items || s.itens || s.questions || [];
+      return sectionItems.map(item => ({
         ...item,
         section_id: s.id,
         score: null,
         comment: "",
         photos: []
-      }))
-    );
+      }));
+    });
     
     const sections = templateSections.map(s => ({
       id: s.id,
@@ -172,16 +173,15 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // --- UPDATED: safer sync that only sends allowed columns ---
   const syncInspectionToSupabase = async (insp) => {
     try {
       const safeInsp = {
-        id: insp.id,
-        location_id: insp.location_id,
+        id: String(insp.id),
+        location_id: Number(insp.location_id) || null,
         location_name: insp.location_name,
-        inspector_id: insp.inspector_id,
+        inspector_id: Number(insp.inspector_id) || null,
         inspector_name: insp.inspector_name,
-        supervisor_id: insp.supervisor_id,
+        supervisor_id: Number(insp.supervisor_id) || null,
         supervisor_name: insp.supervisor_name,
         status: insp.status,
         accepted: insp.accepted,
@@ -209,15 +209,23 @@ function AppContent() {
         const dbUsers = await authService.getAllUsers();
         setUsers(dbUsers.length > 0 ? dbUsers : SEED_USERS);
 
-        // --- CORRECTED: Load Templates with full format ---
+        const { data: dbLocations } = await supabase.from('fims_locations').select('*').order('name', { ascending: true });
+        if (dbLocations && dbLocations.length > 0) setLocations(dbLocations);
+
+        // Load Templates from Supabase and force format
         const { data: dbTemplates } = await supabase.from('fims_templates').select('*');
         if (dbTemplates && dbTemplates.length > 0) {
           const templateMap = {};
           const clientList = [];
           dbTemplates.forEach(t => {
-            // Map to the exact format getClientTemplate expects
+            let parsedSections = t.sections;
+            if (typeof parsedSections === 'string') {
+              try { parsedSections = JSON.parse(parsedSections); } catch (e) { parsedSections = []; }
+            }
+            if (!Array.isArray(parsedSections)) parsedSections = [];
+            
             templateMap[t.client_name] = {
-              sections: t.sections || [],
+              sections: parsedSections,
               clientName: t.client_name,
               totalItems: t.total_items || 0
             };
@@ -226,10 +234,6 @@ function AppContent() {
           localStorage.setItem('fims_templates', JSON.stringify(templateMap));
           localStorage.setItem('fims_template_clients', JSON.stringify(clientList));
         }
-        // --- End fix ---
-
-        const { data: dbLocations } = await supabase.from('fims_locations').select('*').order('name', { ascending: true });
-        if (dbLocations && dbLocations.length > 0) setLocations(dbLocations);
 
         const { data: supabaseInspections, error } = await supabase.from('fims_inspections').select('*');
         if (!error && supabaseInspections) {
@@ -307,6 +311,33 @@ function AppContent() {
   const handleStartInspection = (insp) => {
     let updated = { ...insp };
     if (insp.status === "pending" || insp.status === "needs_corrections") updated.status = "in_progress";
+    
+    if (!updated.items || updated.items.length === 0) {
+      const template = getClientTemplate(updated.location_name);
+      const templateSections = template.sections || [];
+      
+      updated.items = templateSections.flatMap(s => {
+        const sectionItems = s.items || s.itens || s.questions || [];
+        return sectionItems.map(item => ({
+          ...item,
+          section_id: s.id,
+          score: null,
+          comment: "",
+          photos: []
+        }));
+      });
+      
+      updated.sections = templateSections.map(s => ({
+        id: s.id,
+        title: s.title || s.name,
+        observation: "",
+        photos: []
+      }));
+      
+      updated.template_id = template.clientId || "DEFAULT";
+      updated.template_version = template.version || "1.0";
+    }
+    
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     syncInspectionToSupabase(updated);
     setEditingInspection(updated);
@@ -345,7 +376,18 @@ function AppContent() {
   };
 
   const handleCreateSchedule = (tasks) => {
-    const tasksWithTemplates = tasks.map(task => { const t = getClientTemplate(task.location_name); return { ...task, items: (t.sections||[]).flatMap(s => (s.items||[]).map(i => ({...i, section_id:s.id, score:null, comment:"", photos:[]}))), sections: (t.sections||[]).map(s => ({id:s.id, observation:"", photos:[]})) }; });
+    const tasksWithTemplates = tasks.map(task => { 
+      const t = getClientTemplate(task.location_name); 
+      const tSections = t.sections || [];
+      return { 
+        ...task, 
+        items: tSections.flatMap(s => {
+          const sectionItems = s.items || s.itens || s.questions || [];
+          return sectionItems.map(i => ({...i, section_id:s.id, score:null, comment:"", photos:[]}));
+        }), 
+        sections: tSections.map(s => ({id:s.id, title: s.title || s.name, observation:"", photos:[]})) 
+      }; 
+    });
     setInspections(prev => [...tasksWithTemplates, ...prev]);
     tasksWithTemplates.forEach(t => {
       syncInspectionToSupabase(t);
@@ -355,7 +397,18 @@ function AppContent() {
   };
 
   const handleBulkSchedule = (tasks) => {
-    const tasksWithTemplates = tasks.map(task => { const t = getClientTemplate(task.location_name); return { ...task, items: (t.sections||[]).flatMap(s => (s.items||[]).map(i => ({...i, section_id:s.id, score:null, comment:"", photos:[]}))), sections: (t.sections||[]).map(s => ({id:s.id, observation:"", photos:[]})) }; });
+    const tasksWithTemplates = tasks.map(task => { 
+      const t = getClientTemplate(task.location_name); 
+      const tSections = t.sections || [];
+      return { 
+        ...task, 
+        items: tSections.flatMap(s => {
+          const sectionItems = s.items || s.itens || s.questions || [];
+          return sectionItems.map(i => ({...i, section_id:s.id, score:null, comment:"", photos:[]}));
+        }), 
+        sections: tSections.map(s => ({id:s.id, title: s.title || s.name, observation:"", photos:[]})) 
+      }; 
+    });
     setInspections(prev => [...tasksWithTemplates, ...prev]);
     tasksWithTemplates.forEach(t => syncInspectionToSupabase(t));
     setShowBulkModal(false);
