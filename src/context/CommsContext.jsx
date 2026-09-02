@@ -12,14 +12,12 @@ export function CommsProvider({ children }) {
   const [draft, setDraft] = useState("");
 
   useEffect(() => {
-    // 1. Fetch existing notifications from Supabase
     const fetchNotifs = async () => {
       const { data } = await supabase.from('fims_notifications').select('*').order('timestamp', { ascending: false });
       if (data) setNotifications(data);
     };
     fetchNotifs();
 
-    // 2. Subscribe to Realtime notifications
     const channel = supabase
       .channel('custom-all-channel')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'fims_notifications' }, payload => {
@@ -32,8 +30,8 @@ export function CommsProvider({ children }) {
     };
   }, []);
 
-  // Send notification to Supabase (Realtime broadcasts it to everyone)
   const notify = async (userId, text, link = null) => {
+    console.log("🔔 NOTIFY TRIGGERED FOR USER ID:", userId);
     try {
       const notif = {
         id: genId(),
@@ -43,9 +41,16 @@ export function CommsProvider({ children }) {
         read: false,
         link
       };
-      await supabase.from('fims_notifications').insert([notif]);
+      console.log("💾 Saving notification to Supabase:", notif);
+      const { data, error } = await supabase.from('fims_notifications').insert([notif]).select();
+      
+      if (error) {
+        console.error("🔴 SUPABASE NOTIFICATION ERROR:", error.message);
+      } else {
+        console.log("✅ NOTIFICATION SAVED SUCCESSFULLY:", data);
+      }
     } catch (err) {
-      console.error("Notification error:", err);
+      console.error("Notification system error:", err);
     }
   };
 
