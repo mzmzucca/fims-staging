@@ -1,59 +1,69 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Icon } from "../lib/icons";
-import { optimizeImage } from "../lib/imageOptimizer";
 
-export default function PhotoUploader({ id, photos, onAdd, onRemove, max = 3, isRequired, label }) {
-  const fileInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
-  const [uploading, setUploading] = useState(false);
-  const [lightboxUrl, setLightboxUrl] = useState(null);
-  const [dragging, setDragging] = useState(false);
+export default function PhotoUploader({ photos, onAdd, onRemove }) {
+  const [compressing, setCompressing] = useState(false);
 
-  const handleFiles = async (files) => {
-    setUploading(true);
-    const arr = Array.from(files);
-    for (let file of arr) {
-      if (photos.length >= max) break;
-      const optimized = await optimizeImage(file);
-      await onAdd(id, optimized);
-    }
-    setUploading(false);
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setCompressing(true);
+    
+    // Compress image to Base64
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800; // Resize to max 800px width to keep DB small
+        const scale = MAX_WIDTH / img.width;
+        canvas.width = MAX_WIDTH;
+        canvas.height = img.height * scale;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        // Convert to JPEG at 70% quality
+        const base64 = canvas.toDataURL('image/jpeg', 0.7);
+        onAdd(base64);
+        setCompressing(false);
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = ''; // Reset input
   };
 
   return (
-    <div style={{ marginTop: 8 }}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-        <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current.click()} disabled={photos.length >= max}>
-          <Icon name="file" size={12} /> Galeria
-        </button>
-        <button className="btn btn-primary btn-sm" onClick={() => cameraInputRef.current.click()} disabled={photos.length >= max}>
-          <Icon name="camera" size={12} /> Câmara
-        </button>
-        <div style={{ marginLeft: "auto", fontSize: 11, fontWeight: 500, color: photos.length >= max ? "#0F6E56" : (isRequired ? "#A32D2D" : "#888") }}>
-          {photos.length}/{max} Fotos
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      {photos.map((p, i) => (
+        <div key={i} style={{ position: 'relative', width: 60, height: 60 }}>
+          <img src={p} alt="Evidence" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} />
+          <button 
+            onClick={() => onRemove(i)} 
+            style={{ 
+              position: 'absolute', top: -4, right: -4, background: '#DC2626', color: '#fff', 
+              borderRadius: '50%', width: 18, height: 18, border: 'none', cursor: 'pointer', 
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 
+            }}
+          >
+            <Icon name="x" size={10} />
+          </button>
         </div>
-      </div>
-
-      <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => { handleFiles(e.target.files); e.target.value = ""; }} />
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={e => { handleFiles(e.target.files); e.target.value = ""; }} />
-
-      {uploading && <div style={{ fontSize: 11, color: "#378ADD", marginBottom: 8 }}>⚙️ A otimizar e guardar...</div>}
-
-      {photos.length > 0 && (
-        <div className="photo-grid">
-          {photos.map(p => (
-            <div key={p.id} className="photo-thumb">
-              <img src={p.url} alt={p.filename} onClick={() => setLightboxUrl(p.url)} />
-              <button className="photo-thumb-remove" onClick={() => onRemove(id, p)}><Icon name="x" size={12} /></button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {lightboxUrl && (
-        <div className="photo-lightbox-overlay" onClick={() => setLightboxUrl(null)}>
-          <img src={lightboxUrl} alt="Evidência" />
-        </div>
+      ))}
+      
+      {photos.length < 4 && (
+        <label style={{ 
+          width: 60, height: 60, border: '2px dashed #ccc', borderRadius: 6, 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' 
+        }}>
+          {compressing ? (
+            <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }}></div>
+          ) : (
+            <Icon name="camera" size={20} />
+          )}
+          <input type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: 'none' }} />
+        </label>
       )}
     </div>
   );

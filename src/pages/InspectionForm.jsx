@@ -2,8 +2,8 @@
 import { useState, useEffect } from "react";
 import { Icon } from "../lib/icons";
 import { calcScore, isItemComplete, getCategoryHealth, generateAISummary } from "../lib/helpers";
-import { photoStore } from "../lib/photoStore";
 import { getClientTemplate } from "../data/constants";
+import { supabase } from "../lib/supabase";
 import SignaturePad from "../components/SignaturePad";
 import PhotoUploader from "../components/PhotoUploader";
 import VoiceInput from "../components/VoiceInput";
@@ -19,7 +19,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
       return {
         ...insp,
         items: templateSections.flatMap(s => 
-          (s.items || []).map(item => ({ 
+          (s.items || s.itens || []).map(item => ({ 
             ...item, 
             section_id: s.id, 
             score: null, 
@@ -62,7 +62,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
   const [notes, setNotes] = useState(() => loadDraft("notes", safeInspection.notes || ""));
   const [expandedSections, setExpandedSections] = useState([]);
   const [saved, setSaved] = useState(false);
-  const [photosByItem, setPhotosByItem] = useState({});
   const [validationErrors, setValidationErrors] = useState(null);
   const [showAIPanel, setShowAIPanel] = useState(false);
 
@@ -74,16 +73,43 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
   const [showRefModal, setShowRefModal] = useState(null);
   const [refPhotos, setRefPhotos] = useState([]);
 
-  // Obter seções do template atual
   const currentTemplate = getClientTemplate(safeInspection.location_name);
   const templateSections = currentTemplate.sections || [];
 
-  // Expandir primeira seção por padrão
   useEffect(() => {
     if (templateSections.length > 0 && expandedSections.length === 0) {
       setExpandedSections([templateSections[0].id]);
     }
   }, [templateSections]);
+
+  // Fetch real template from Supabase if inspection is missing items
+  useEffect(() => {
+    async function fetchMissingTemplate() {
+      if (items.length <= 2 && safeInspection.location_name) {
+        const { data } = await supabase.from('fims_templates').select('sections').eq('client_name', safeInspection.location_name).single();
+        if (data && data.sections && data.sections.length > 0) {
+          const newItems = data.sections.flatMap(s => 
+            (s.items || s.itens || []).map(item => ({ 
+              ...item, 
+              section_id: s.id, 
+              score: null, 
+              comment: "", 
+              photos: [] 
+            }))
+          );
+          const newSections = data.sections.map(s => ({ 
+            id: s.id, 
+            title: s.title || s.name,
+            observation: "", 
+            photos: [] 
+          }));
+          setItems(newItems);
+          setSections(newSections);
+        }
+      }
+    }
+    fetchMissingTemplate();
+  }, [safeInspection.id]);
 
   useEffect(() => {
     const draftData = { items, sections, notes, clientMgrName, inspectorSig, clientSig };
@@ -100,28 +126,18 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
     }
   }, [gpsCoords]);
 
-  useEffect(() => {
-    let cancelled = false;
-    photoStore.listByInspection(safeInspection.id).then(grouped => {
-      if (cancelled) return;
-      setPhotosByItem(grouped);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [safeInspection.id]);
-
   const setScore = (itemId, score) => setItems(prev => prev.map(i => i.id === itemId ? { ...i, score } : i));
   const setComment = (itemId, comment) => setItems(prev => prev.map(i => i.id === itemId ? { ...i, comment } : i));
   const setSectionObservation = (secId, text) => setSections(prev => prev.map(s => s.id === secId ? { ...s, observation: text } : s));
 
-  const addPhoto = async (entityId, file) => {
-    const meta = await photoStore.add(safeInspection.id, entityId, file);
-    meta.url = URL.createObjectURL(file);
-    setPhotosByItem(prev => ({ ...prev, [entityId]: [...(prev[entityId] || []), meta] }));
+  const addPhoto = (entityId, base64) => {
+    setItems(prev => prev.map(i => i.id === entityId ? { ...i, photos: [...(i.photos || []), base64] } : i));
+    setSections(prev => prev.map(s => s.id === entityId ? { ...s, photos: [...(s.photos || []), base64] } : s));
   };
 
-  const removePhoto = async (entityId, photo) => {
-    await photoStore.remove(photo.id);
-    setPhotosByItem(prev => ({ ...prev, [entityId]: (prev[entityId] || []).filter(p => p.id !== photo.id) }));
+  const removePhoto = (entityId, index) => {
+    setItems(prev => prev.map(i => i.id === entityId ? { ...i, photos: (i.photos || []).filter((_, idx) => idx !== index) } : i));
+    setSections(prev => prev.map(s => s.id === entityId ? { ...s, photos: (s.photos || []).filter((_, idx) => idx !== index) } : s));
   };
 
   const handleShowRefImage = (itemId) => {
@@ -129,13 +145,19 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
     const clientInsps = allInspections.filter(i => i.location_id === safeInspection.location_id && i.id !== safeInspection.id && i.score_pct !== null);
     if (clientInsps.length === 0) return alert("No previous inspections found for this client.");
     const lastInsp = clientInsps.sort((a,b) => new Date(b.date) - new Date(a.date))[0];
-    photoStore.listByInspection(lastInsp.id).then(grouped => {
-      setRefPhotos(grouped[itemId] || []);
-      setShowRefModal(itemId);
-    });
+    
+    const lastItem = lastInsp.items?.find(i => i.id === itemId);
+    setRefPhotos(lastItem?.photos || []);
+    setShowRefModal(itemId);
   };
 
-  const photoCount = entityId => (photosByItem[entityId] || []).length;
+  const photoCount = entityId => {
+    const item = items.find(i => i.id === entityId);
+    if (item) return item.photos?.length || 0;
+    const sec = sections.find(s => s.id === entityId);
+    return sec?.photos?.length || 0;
+  };
+
   const totalComplete = items.filter(i => isItemComplete(i, photoCount(i.id))).length;
   const totalItems = items.length;
 
@@ -150,14 +172,14 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
     
     templateSections.forEach(section => {
       const sItems = items.filter(i => i.section_id === section.id);
-      const secData = sections.find(s => s.id === section.id) || { observation: "" };
+      const secData = sections.find(s => s.id === section.id) || { observation: "", photos: [] };
       const secErrors = [];
 
       if (!secData.observation || !secData.observation.trim()) {
         secErrors.push("Category observation is missing (Mandatory).");
       }
 
-      const catPhotos = photosByItem[section.id] || [];
+      const catPhotos = secData.photos || [];
       if (catPhotos.length < 3) {
         secErrors.push(`Category requires at least 3 photos (has ${catPhotos.length}).`);
       }
@@ -169,7 +191,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
           if (!item.comment || !item.comment.trim()) {
             secErrors.push(`Note missing for: "${item.label || item.text}" (Score ${item.score}).`);
           }
-          const itemPhotos = photosByItem[item.id] || [];
+          const itemPhotos = item.photos || [];
           if (itemPhotos.length < 3) {
             secErrors.push(`3 photos required for: "${item.label || item.text}" (Score ${item.score}).`);
           }
@@ -233,7 +255,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
         </div>
       </div>
 
-      {/* Validation Modal - same as before */}
       {validationErrors && (
         <div className="modal-overlay" onClick={() => setValidationErrors(null)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
@@ -261,7 +282,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
         </div>
       )}
 
-      {/* AI Panel - same as before */}
       {showAIPanel && (
         <div className="modal-overlay" onClick={() => setShowAIPanel(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
@@ -284,11 +304,10 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
         </div>
       )}
 
-      {/* Collapsible Categories */}
       <div style={{ marginBottom: 16 }}>
         {templateSections.map(section => {
           const sItems = items.filter(i => i.section_id === section.id);
-          const secData = sections.find(s => s.id === section.id) || { observation: "" };
+          const secData = sections.find(s => s.id === section.id) || { observation: "", photos: [] };
           const health = getCategoryHealth(sItems);
           const isExpanded = expandedSections.includes(section.id);
           const complete = sItems.filter(i => isItemComplete(i, photoCount(i.id))).length;
@@ -327,12 +346,9 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
                     />
                     <label className="form-label" style={{ fontWeight: 600 }}>Category Photos (Min 3, Max 4) <span className="required">*</span></label>
                     <PhotoUploader 
-                      id={section.id} 
-                      photos={photosByItem[section.id] || []} 
-                      onAdd={addPhoto} 
-                      onRemove={removePhoto} 
-                      max={4} 
-                      isRequired={true} 
+                      photos={secData.photos || []} 
+                      onAdd={(base64) => addPhoto(section.id, base64)} 
+                      onRemove={(index) => removePhoto(section.id, index)} 
                     />
                   </div>
 
@@ -347,7 +363,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
                       <div key={item.id} className={`checklist-item ${scored ? "scored" : ""} ${complete ? "complete" : needsNote || needsPhotos ? "needs-note" : ""}`}>
                         <div style={{ marginBottom: 8, fontSize: 13, display: "flex", alignItems: "flex-start", gap: 6 }}>
                           <span style={{ flex: 1 }}>{item.label || item.text}</span>
-                          {complete && <Icon name="check" size={14} style={{ color: "#0F6E56", flexShrink: 0, marginTop: 1 }} />}
+                          {complete && <Icon name="check" size={14} style={{ color: "#0F6E56", flexShrink: 0, marginTop: 1 }} />} 
                         </div>
                         
                         {item.qc_comment && (
@@ -382,7 +398,11 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
                             <Icon name="alert" size={12} /> Photo evidence required for scores 1-3.
                           </div>
                         )}
-                        <PhotoUploader id={item.id} photos={photosByItem[item.id] || []} onAdd={addPhoto} onRemove={removePhoto} max={3} isRequired={isLowScore} />
+                        <PhotoUploader 
+                          photos={item.photos || []} 
+                          onAdd={(base64) => addPhoto(item.id, base64)} 
+                          onRemove={(index) => removePhoto(item.id, index)} 
+                        />
                       </div>
                     );
                   })}
@@ -413,7 +433,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
           <div style={{ flex: 1, minWidth: 250 }}>
             <SignaturePad label="Assinatura do Cliente *" onSave={setClientSig} onClear={() => setClientSig("")} />
             {clientSig && <div style={{ fontSize: 11, color: "#0F6E56", marginBottom: 8 }}>✓ Assinatura do Cliente capturada.</div>}
-            {clientSig && <img src={clientSig} alt="Assinatura Cliente" style={{ width: 100, height: 30, objectFit: 'contain' }} />}
+            {clientSig && <img src={clientSig} alt="Assinatura Cliente" style={{ width: 100, height: 30, objectFit: 'contain' }}/>}
           </div>
         </div>
       </div>
@@ -429,7 +449,11 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
             <div className="modal-header"><div style={{ fontSize: 15, fontWeight: 500 }}>Reference Images (Last Inspection)</div><button className="icon-btn" onClick={() => setShowRefModal(null)}><Icon name="x" size={14} /></button></div>
             <div className="modal-body">
               {refPhotos.length === 0 ? <div style={{ textAlign: "center", color: "#888", padding: 20 }}>No reference photos found for this item.</div> : (
-                <div className="photo-grid">{refPhotos.map(p => (<div key={p.id} className="photo-thumb"><img src={p.url} alt={p.filename} /></div>))}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {refPhotos.map((p, i) => (
+                    <img key={i} src={p} alt="Ref" style={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 6 }} />
+                  ))}
+                </div>
               )}
             </div>
           </div>

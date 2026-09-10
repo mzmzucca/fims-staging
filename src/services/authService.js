@@ -26,7 +26,7 @@ export const authService = {
       };
 
       localStorage.setItem('fims_current_user', JSON.stringify(formattedUser));
-      await this.logActivity(formattedUser.id, formattedUser.name, 'Login', 'login', 'Entrou no sistema');
+      await this.logActivity(formattedUser, 'Login', 'auth', { ip: 'unknown' });
 
       return { success: true, user: formattedUser };
     } catch (err) {
@@ -37,7 +37,8 @@ export const authService = {
 
   async logout(userId, userName) {
     try {
-      if (userId) await this.logActivity(userId, userName, 'Logout', 'logout', 'Saiu do sistema');
+      const user = { id: userId, name: userName };
+      if (userId) await this.logActivity(user, 'Logout', 'auth', {});
       localStorage.removeItem('fims_current_user');
       return { success: true };
     } catch (err) {
@@ -69,14 +70,15 @@ export const authService = {
     }
   },
 
-  async logActivity(userId, userName, action, type, detail) {
+  async logActivity(user, action, action_type, metadata = {}) {
     try {
       await supabase.from('fims_logs').insert([{
-        user_id: Number(userId) || null,
-        user_name: userName,
+        user_id: Number(user.id) || null,
+        user_name: user.name || 'System',
         action: action,
-        type: type,
-        detail: detail
+        action_type: action_type,
+        detail: typeof metadata === 'string' ? metadata : JSON.stringify(metadata),
+        metadata: metadata
       }]);
     } catch (err) {
       console.error('Error saving log:', err);

@@ -299,6 +299,15 @@ function AppContent() {
     setCurrentUser(null);
     setPage("dashboard");
   };
+  const handleDeleteInspection = async (id) => {
+    if (!window.confirm('Tem certeza que deseja eliminar esta inspeção permanentemente?')) return;
+    setInspections(prev => prev.filter(i => i.id !== id));
+    try {
+      await supabase.from('fims_inspections').delete().eq('id', id);
+    } catch (err) {
+      console.error('Error deleting inspection:', err);
+    }
+  };
 
   const handleNavigate = (p) => {
     setPage(p);
@@ -485,7 +494,7 @@ function AppContent() {
           : page === "locations" ? <LocationsPage locations={locations} setLocations={setLocations} users={users} inspections={inspections} /> 
           : page === "templates" ? <TemplatesPage /> 
           : page === "audit" ? <AuditPage auditLogs={auditLogs} /> 
-          : page === "settings" ? <SettingsPage /> 
+          : page === "settings" ? <SettingsPage inspections={inspections} onDeleteInspection={handleDeleteInspection} /> 
           : null}
         </div>
       </div>

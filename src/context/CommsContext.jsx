@@ -12,26 +12,39 @@ export function CommsProvider({ children }) {
   const [draft, setDraft] = useState("");
 
   useEffect(() => {
-    const fetchNotifs = async () => {
-      const { data } = await supabase.from('fims_notifications').select('*').order('timestamp', { ascending: false });
-      if (data) setNotifications(data);
-    };
-    fetchNotifs();
+    // 1. Fetch existing notifications and messages
+    const fetchInitialData = async () => {
+      const { data: notifs } = await supabase.from('fims_notifications').select('*').order('timestamp', { ascending: false });
+      if (notifs) setNotifications(notifs);
 
-    const channel = supabase
-      .channel('custom-all-channel')
+      const { data: msgs } = await supabase.from('fims_messages').select('*').order('timestamp', { ascending: true });
+      if (msgs) setMessages(msgs);
+    };
+    fetchInitialData();
+
+    // 2. Subscribe to Realtime notifications
+    const notifChannel = supabase
+      .channel('notif-channel')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'fims_notifications' }, payload => {
         setNotifications(prev => [payload.new, ...prev]);
       })
       .subscribe();
 
+    // 3. Subscribe to Realtime messages
+    const msgChannel = supabase
+      .channel('msg-channel')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'fims_messages' }, payload => {
+        setMessages(prev => [...prev, payload.new]);
+      })
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(notifChannel);
+      supabase.removeChannel(msgChannel);
     };
   }, []);
 
   const notify = async (userId, text, link = null) => {
-    console.log("🔔 NOTIFY TRIGGERED FOR USER ID:", userId);
     try {
       const notif = {
         id: genId(),
@@ -41,16 +54,9 @@ export function CommsProvider({ children }) {
         read: false,
         link
       };
-      console.log("💾 Saving notification to Supabase:", notif);
-      const { data, error } = await supabase.from('fims_notifications').insert([notif]).select();
-      
-      if (error) {
-        console.error("🔴 SUPABASE NOTIFICATION ERROR:", error.message);
-      } else {
-        console.log("✅ NOTIFICATION SAVED SUCCESSFULLY:", data);
-      }
+      await supabase.from('fims_notifications').insert([notif]);
     } catch (err) {
-      console.error("Notification system error:", err);
+      console.error("Notification error:", err);
     }
   };
 
@@ -66,16 +72,29 @@ export function CommsProvider({ children }) {
 
   const clearDraft = () => setDraft("");
   
-  const sendMessage = (fromId, toId, text) => {
-    const msg = { id: genId(), fromId, toId, text: text.trim(), timestamp: new Date().toISOString(), read: false };
-    setMessages(prev => [...prev, msg]);
-    return msg;
+  const sendMessage = async (fromUser, toUser, text) => {
+    try {
+      const msg = {
+        id: genId(),
+        from_id: Number(fromUser.id),
+        from_name: fromUser.name,
+        to_id: Number(toUser.id),
+        to_name: toUser.name,
+        text: text.trim(),
+        timestamp: new Date().toISOString(),
+        read: false,
+        is_broadcast: false
+      };
+      await supabase.from('fims_messages').insert([msg]);
+    } catch (err) {
+      console.error("Send message error:", err);
+    }
   };
 
   const getConversation = (userId1, userId2) => {
     return messages.filter(m =>
-      (m.fromId === userId1 && m.toId === userId2) ||
-      (m.fromId === userId2 && m.toId === userId1)
+      (m.from_id === userId1 && m.to_id === userId2) ||
+      (m.from_id === userId2 && m.to_id === userId1)
     ).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
   };
 

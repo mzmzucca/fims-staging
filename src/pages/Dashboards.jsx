@@ -212,11 +212,8 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
         </div>
       )}
 
-      <div className="metric-grid">
-        <div className="metric-card"><div className="metric-label">Global Score</div><div className="metric-value" style={{ color: scoreLabel(avgScore).color }}>{avgScore}%</div></div>
-        <div className="metric-card"><div className="metric-label">SLA Compliance ({SLA_TARGET}%)</div><div className="metric-value" style={{ color: slaCompliance >= 80 ? "#0F6E56" : "#A32D2D" }}>{slaCompliance}%</div></div>
-        <div className="metric-card"><div className="metric-label">Penalty Risk</div><div className="metric-value" style={{ color: estimatedPenaltyRisk > 0 ? "#A32D2D" : "#3B6D11" }}>{estimatedPenaltyRisk.toLocaleString()} MT</div></div>
-        <div className="metric-card"><div className="metric-label">Bonus Pool</div><div className="metric-value" style={{ color: "#0F6E56" }}>{inspectorBonusPool.toLocaleString()} MT</div></div>
+            <div className="metric-grid">
+        <div className="metric-card"><div className="metric-label">Active Critical Alerts</div><div className="metric-value" style={{ color: critical ? "#A32D2D" : "#3B6D11" }}>{critical}</div></div>
       </div>
 
       <div className="two-col" style={{ marginBottom: 16 }}>
