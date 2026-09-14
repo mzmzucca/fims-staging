@@ -19,7 +19,6 @@ function getCompanyAnalytics(inspections) {
   const submitted = inspections.filter(i => i.score_pct !== null);
   const catScores = {};
   const issueMap = {};
-
   submitted.forEach(insp => {
     if (!insp.items) return;
     insp.items.forEach(item => {
@@ -28,7 +27,6 @@ function getCompanyAnalytics(inspections) {
         if (!catScores[secName]) catScores[secName] = { total: 0, count: 0 };
         catScores[secName].total += item.score;
         catScores[secName].count++;
-
         if (item.score <= 2) {
           if (!issueMap[item.text]) issueMap[item.text] = 0;
           issueMap[item.text]++;
@@ -36,15 +34,12 @@ function getCompanyAnalytics(inspections) {
       }
     });
   });
-
   const lowestCategories = Object.keys(catScores).map(name => ({
     name,
     avg: Number((catScores[name].total / catScores[name].count).toFixed(1))
   })).sort((a, b) => a.avg - b.avg).slice(0, 3);
-
   const commonIssues = Object.keys(issueMap).map(text => ({ text, count: issueMap[text] }))
     .sort((a, b) => b.count - a.count).slice(0, 5);
-
   return { lowestCategories, commonIssues };
 }
 
@@ -53,7 +48,6 @@ function getCompanyAnalytics(inspections) {
 // ============================================================
 export function CEODashboard({ inspections, locations, auditLogs, currentUser }) {
   const [capas, setCapas] = useState([]);
-
   useEffect(() => {
     const fetchCapas = async () => {
       const { data } = await supabase.from('fims_capas').select('*').order('created_at', { ascending: false });
@@ -61,6 +55,7 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
     };
     fetchCapas();
   }, []);
+
   const { announcements, createAnnouncement } = useComms();
   const [showAnnModal, setShowAnnModal] = useState(false);
   const [annText, setAnnText] = useState("");
@@ -69,7 +64,6 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
     const saved = localStorage.getItem(DISMISSED_SYSTEM_ALERTS_KEY);
     return saved ? JSON.parse(saved) : [];
   });
-
   const [systemAlerts, setSystemAlerts] = useState(() => {
     const fixedAlerts = [
       "O sistema está em revisão",
@@ -121,7 +115,6 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
   const estimatedPenaltyRisk = failedSlaCount * 15000;
   const excellentClients = locations.filter(l => { const li = submitted.filter(i => i.location_id === l.id); return li.length ? (li.reduce((s,i) => s+i.score_pct, 0) / li.length) >= 95 : false; }).length;
   const inspectorBonusPool = excellentClients * 5000;
-
   const highLevelLogs = auditLogs.filter(l => ["review", "notification", "schedule", "capa_alert"].includes(l.type)).slice(0, 5);
 
   const handleBoardroomPDF = () => {
@@ -341,13 +334,22 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
 // SUPERVISOR DASHBOARD
 // ============================================================
 export function SupervisorDashboard({ inspections, users, currentUser, onView }) {
+  // ✅ FIXED: CAPA state was missing here (this was the crash)
+  const [capas, setCapas] = useState([]);
+  useEffect(() => {
+    const fetchCapas = async () => {
+      const { data } = await supabase.from('fims_capas').select('*').order('created_at', { ascending: false });
+      setCapas(data || []);
+    };
+    fetchCapas();
+  }, []);
+
   const { announcements } = useComms();
   
   const [dismissedAlerts, setDismissedAlerts] = useState(() => {
     const saved = localStorage.getItem(DISMISSED_SYSTEM_ALERTS_KEY);
     return saved ? JSON.parse(saved) : [];
   });
-
   const [systemAlerts, setSystemAlerts] = useState(() => {
     const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
     const fixedAlerts = ["O sistema está em revisão", "O sistema está sobre revisão!"];
@@ -502,7 +504,7 @@ export function SupervisorDashboard({ inspections, users, currentUser, onView })
 
       {/* PHASE 5: CAPA TRACKING */}
       <div className="card" style={{ marginTop: 16 }}>
-        <h3 style={{ fontSize: 15, marginBottom: 16, color: '#1E2A3A' }}>🚨 Corrective Actions (CAPA)</h3>
+        <h3 style={{ fontSize: 15, marginBottom: 16, color: '#1E2A3A' }}>Corrective Actions (CAPA)</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
           <div style={{ background: '#FEE2E2', padding: 12, borderRadius: 8, textAlign: 'center' }}>
             <div style={{ fontSize: 24, fontWeight: 800, color: '#991B1B' }}>{capas.filter(c => c.status === 'open').length}</div>
@@ -534,39 +536,32 @@ export function SupervisorDashboard({ inspections, users, currentUser, onView })
 
       {/* PHASE 4: RISK INTELLIGENCE & ANOMALY DETECTION */}
       <div className="card" style={{ marginTop: 16, borderLeft: '4px solid #A32D2D' }}>
-        <h3 style={{ fontSize: 15, marginBottom: 12, color: '#A32D2D' }}>⚠️ Risk & Anomaly Watchlist</h3>
+        <h3 style={{ fontSize: 15, marginBottom: 12, color: '#A32D2D' }}>Risk & Anomaly Watchlist</h3>
         <p style={{ fontSize: 12, color: '#666', marginBottom: 16 }}>Automated flags for inspections missing GPS, photos, or scoring below 60%.</p>
         
         {(() => {
           const riskAssessments = submitted.map(insp => {
             let riskScore = 0;
             const reasons = [];
-
             if (!insp.gps_coords) {
               riskScore += 30;
               reasons.push('Missing GPS');
             }
-
             const photoCount = (insp.sections || []).reduce((acc, s) => acc + (s.photos ? s.photos.length : 0), 0);
             if (photoCount < 3) {
               riskScore += 40;
               reasons.push('Low evidence (' + photoCount + ' photos)');
             }
-
             if (insp.score_pct < 60) {
               riskScore += 30;
               reasons.push('Critical score (<60%)');
             }
-
             return { id: insp.id, location: insp.location_name, inspector: insp.inspector_name, riskScore: riskScore, reasons: reasons, score: insp.score_pct };
           });
-
           const highRisk = riskAssessments.filter(i => i.riskScore >= 40).sort((a, b) => b.riskScore - a.riskScore);
-
           if (highRisk.length === 0) {
             return <div style={{ color: '#0F6E56', fontSize: 14, fontWeight: 500 }}>✅ No anomalies detected. All inspections meet compliance standards.</div>;
           }
-
           return (
             <table className="table">
               <thead>
@@ -606,7 +601,6 @@ export function InspectorDashboard({ inspections, users, currentUser, onStartIns
     const saved = localStorage.getItem(DISMISSED_SYSTEM_ALERTS_KEY);
     return saved ? JSON.parse(saved) : [];
   });
-
   const [systemAlerts, setSystemAlerts] = useState(() => {
     const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
     const fixedAlerts = ["O sistema está em revisão", "O sistema está sobre revisão!"];
@@ -636,10 +630,8 @@ export function InspectorDashboard({ inspections, users, currentUser, onStartIns
   // ===== FIXED FILTER (handles ID type mismatch + name fallback) =====
   const myInsp = inspections.filter(i => {
     if (i.type === "leave") return false;
-
     // Match by ID (number or string)
     if (String(i.inspector_id) === String(currentUser.id)) return true;
-
     // Fallback: match by name (while IDs are inconsistent between seed and Supabase)
     if (
       i.inspector_name &&
@@ -648,7 +640,6 @@ export function InspectorDashboard({ inspections, users, currentUser, onStartIns
     ) {
       return true;
     }
-
     return false;
   });
 
@@ -750,7 +741,6 @@ export function InspectorDashboard({ inspections, users, currentUser, onStartIns
               ))}
             </div>
           )}
-
           {assigned.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
               <h3 style={{ marginBottom: 12, fontSize: 15 }}>{t.assigned}</h3>
@@ -765,7 +755,6 @@ export function InspectorDashboard({ inspections, users, currentUser, onStartIns
               ))}
             </div>
           )}
-
           <div className="card">
             <h3 style={{ marginBottom: 12, fontSize: 15 }}>{t.drafts}</h3>
             {drafts.length === 0 ? (
@@ -783,7 +772,6 @@ export function InspectorDashboard({ inspections, users, currentUser, onStartIns
             )}
           </div>
         </div>
-
         <div className="card">
           <h3 style={{ marginBottom: 12, fontSize: 15 }}>{t.recent_activity}</h3>
           {recent.length === 0 ? (
