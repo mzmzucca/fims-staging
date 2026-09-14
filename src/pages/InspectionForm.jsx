@@ -4,6 +4,7 @@ import { Icon } from "../lib/icons";
 import { calcScore, isItemComplete, getCategoryHealth, generateAISummary } from "../lib/helpers";
 import { getClientTemplate } from "../data/constants";
 import { supabase } from "../lib/supabase";
+import { dataStore } from "../lib/dataStore";
 import { authService } from "../services/authService";
 import SignaturePad from "../components/SignaturePad";
 import PhotoUploader from "../components/PhotoUploader";
@@ -43,12 +44,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
 
   const loadDraft = (field, fallback) => {
     try {
-      const saved = localStorage.getItem(draftKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (field === "items" && Array.isArray(parsed[field]) && parsed[field].length === 0 && Array.isArray(fallback) && fallback.length > 0) return fallback;
-        return parsed[field] !== undefined ? parsed[field] : fallback;
-      }
+      return fallback;
     } catch (e) {}
     return fallback;
   };
@@ -59,6 +55,22 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
   };
 
   const [items, setItems] = useState(() => loadDraft("items", safeInspection.items || []));
+
+  // Fetch draft from IndexedDB on mount
+  useEffect(() => {
+    async function fetchDraft() {
+      const savedDraft = await dataStore.get('drafts', draftKey);
+      if (savedDraft) {
+        if (savedDraft.items) setItems(savedDraft.items);
+        if (savedDraft.sections) setSections(savedDraft.sections);
+        if (savedDraft.notes) setNotes(savedDraft.notes);
+        if (savedDraft.clientMgrName) setClientMgrName(savedDraft.clientMgrName);
+        if (savedDraft.inspectorSig) setInspectorSig(savedDraft.inspectorSig);
+        if (savedDraft.clientSig) setClientSig(savedDraft.clientSig);
+      }
+    }
+    fetchDraft();
+  }, [draftKey]);
   const [sections, setSections] = useState(() => initialSections());
   const [notes, setNotes] = useState(() => loadDraft("notes", safeInspection.notes || ""));
   const [expandedSections, setExpandedSections] = useState([]);
@@ -114,7 +126,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
 
   useEffect(() => {
     const draftData = { items, sections, notes, clientMgrName, inspectorSig, clientSig };
-    localStorage.setItem(draftKey, JSON.stringify(draftData));
+    dataStore.set('drafts', draftKey, draftData); // Save to IndexedDB instead
   }, [items, sections, notes, clientMgrName, inspectorSig, clientSig, draftKey]);
 
   useEffect(() => {
@@ -249,7 +261,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
     const pct = calcScore(clearedItems);
     const alertLevel = pct < 60 ? "critical" : pct < 75 ? "warning" : "ok";
     
-    localStorage.removeItem(draftKey);
+    dataStore.remove('drafts', draftKey);
     onSubmit({ ...safeInspection, items: clearedItems, sections, notes, status: "submitted", score_pct: pct, alert_level: alertLevel, client_mgr_name: clientMgrName, inspector_sig: inspectorSig, client_sig: clientSig, gps_coords: gpsCoords });
   };
 
