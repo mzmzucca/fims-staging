@@ -8,6 +8,7 @@ import { calcScore, scoreLabel, getMonthlyTrend, getClientRisk, getTopBottomPerf
 import { ROLES, TEMPLATE_SECTIONS } from "../data/constants";
 import { useLang } from "../context/LangContext";
 import { useComms } from "../context/CommsContext";
+import { supabase } from "../lib/supabase";
 import { useState, useEffect } from "react";
 
 // Chave para localStorage dos avisos dispensados
@@ -51,6 +52,15 @@ function getCompanyAnalytics(inspections) {
 // CEO DASHBOARD
 // ============================================================
 export function CEODashboard({ inspections, locations, auditLogs, currentUser }) {
+  const [capas, setCapas] = useState([]);
+
+  useEffect(() => {
+    const fetchCapas = async () => {
+      const { data } = await supabase.from('fims_capas').select('*').order('created_at', { ascending: false });
+      setCapas(data || []);
+    };
+    fetchCapas();
+  }, []);
   const { announcements, createAnnouncement } = useComms();
   const [showAnnModal, setShowAnnModal] = useState(false);
   const [annText, setAnnText] = useState("");
@@ -212,8 +222,11 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
         </div>
       )}
 
-            <div className="metric-grid">
-        <div className="metric-card"><div className="metric-label">Active Critical Alerts</div><div className="metric-value" style={{ color: critical ? "#A32D2D" : "#3B6D11" }}>{critical}</div></div>
+      <div className="metric-grid">
+        <div className="metric-card"><div className="metric-label">Global Score</div><div className="metric-value" style={{ color: scoreLabel(avgScore).color }}>{avgScore}%</div></div>
+        <div className="metric-card"><div className="metric-label">SLA Compliance ({SLA_TARGET}%)</div><div className="metric-value" style={{ color: slaCompliance >= 80 ? "#0F6E56" : "#A32D2D" }}>{slaCompliance}%</div></div>
+        <div className="metric-card"><div className="metric-label">Penalty Risk</div><div className="metric-value" style={{ color: estimatedPenaltyRisk > 0 ? "#A32D2D" : "#3B6D11" }}>{estimatedPenaltyRisk.toLocaleString()} MT</div></div>
+        <div className="metric-card"><div className="metric-label">Bonus Pool</div><div className="metric-value" style={{ color: "#0F6E56" }}>{inspectorBonusPool.toLocaleString()} MT</div></div>
       </div>
 
       <div className="two-col" style={{ marginBottom: 16 }}>
@@ -485,6 +498,98 @@ export function SupervisorDashboard({ inspections, users, currentUser, onView })
             </div>
           ))}
         </div>
+      </div>
+
+      {/* PHASE 5: CAPA TRACKING */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3 style={{ fontSize: 15, marginBottom: 16, color: '#1E2A3A' }}>🚨 Corrective Actions (CAPA)</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
+          <div style={{ background: '#FEE2E2', padding: 12, borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: '#991B1B' }}>{capas.filter(c => c.status === 'open').length}</div>
+            <div style={{ fontSize: 11, color: '#991B1B' }}>Open</div>
+          </div>
+          <div style={{ background: '#FEF3C7', padding: 12, borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: '#92400E' }}>{capas.filter(c => c.status === 'in_progress').length}</div>
+            <div style={{ fontSize: 11, color: '#92400E' }}>In Progress</div>
+          </div>
+          <div style={{ background: '#F0FDF4', padding: 12, borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: '#065F46' }}>{capas.filter(c => c.status === 'resolved').length}</div>
+            <div style={{ fontSize: 11, color: '#065F46' }}>Resolved</div>
+          </div>
+        </div>
+        <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+          {capas.filter(c => c.status !== 'resolved').slice(0, 5).map((c, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #eee', fontSize: 13 }}>
+              <div>
+                <strong style={{ color: '#991B1B' }}>{c.score}/5</strong> {c.item_text}
+                <div style={{ fontSize: 11, color: '#888' }}>{c.location_name}</div>
+              </div>
+              <div style={{ fontSize: 11, color: new Date(c.due_date) < new Date() ? '#A32D2D' : '#666' }}>
+                Due: {new Date(c.due_date).toLocaleDateString('pt-PT')}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* PHASE 4: RISK INTELLIGENCE & ANOMALY DETECTION */}
+      <div className="card" style={{ marginTop: 16, borderLeft: '4px solid #A32D2D' }}>
+        <h3 style={{ fontSize: 15, marginBottom: 12, color: '#A32D2D' }}>⚠️ Risk & Anomaly Watchlist</h3>
+        <p style={{ fontSize: 12, color: '#666', marginBottom: 16 }}>Automated flags for inspections missing GPS, photos, or scoring below 60%.</p>
+        
+        {(() => {
+          const riskAssessments = submitted.map(insp => {
+            let riskScore = 0;
+            const reasons = [];
+
+            if (!insp.gps_coords) {
+              riskScore += 30;
+              reasons.push('Missing GPS');
+            }
+
+            const photoCount = (insp.sections || []).reduce((acc, s) => acc + (s.photos ? s.photos.length : 0), 0);
+            if (photoCount < 3) {
+              riskScore += 40;
+              reasons.push('Low evidence (' + photoCount + ' photos)');
+            }
+
+            if (insp.score_pct < 60) {
+              riskScore += 30;
+              reasons.push('Critical score (<60%)');
+            }
+
+            return { id: insp.id, location: insp.location_name, inspector: insp.inspector_name, riskScore: riskScore, reasons: reasons, score: insp.score_pct };
+          });
+
+          const highRisk = riskAssessments.filter(i => i.riskScore >= 40).sort((a, b) => b.riskScore - a.riskScore);
+
+          if (highRisk.length === 0) {
+            return <div style={{ color: '#0F6E56', fontSize: 14, fontWeight: 500 }}>✅ No anomalies detected. All inspections meet compliance standards.</div>;
+          }
+
+          return (
+            <table className="table">
+              <thead>
+                <tr style={{ background: '#FEE2E2' }}>
+                  <th style={{ color: '#991B1B' }}>Location</th>
+                  <th style={{ color: '#991B1B' }}>Inspector</th>
+                  <th style={{ color: '#991B1B' }}>Risk Factors</th>
+                  <th style={{ color: '#991B1B', textAlign: 'center' }}>Risk Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {highRisk.slice(0, 10).map((r, i) => (
+                  <tr key={i}>
+                    <td style={{ fontWeight: 500 }}>{r.location}</td>
+                    <td>{r.inspector || 'N/A'}</td>
+                    <td style={{ fontSize: 12, color: '#666' }}>{r.reasons.join(' | ')}</td>
+                    <td style={{ textAlign: 'center', fontWeight: 800, color: r.riskScore >= 70 ? '#991B1B' : '#92400E' }}>{r.riskScore}/100</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          );
+        })()}
       </div>
     </div>
   );

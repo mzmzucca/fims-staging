@@ -11,10 +11,19 @@ export const authService = {
         .limit(1);
 
       if (error) throw error;
-      if (!users || users.length === 0) return { success: false, error: 'User not found' };
+      
+      if (!users || users.length === 0) {
+        // Log failed login (user not found)
+        await this.logEvent('auth.login_failed', { email }, { reason: 'User not found' });
+        return { success: false, error: 'User not found' };
+      }
 
       const user = users[0];
-      if (user.password !== password) return { success: false, error: 'Wrong password' };
+      if (user.password !== password) {
+        // Log failed login (wrong password)
+        await this.logEvent('auth.login_failed', { email: user.email, id: user.id, name: user.name, role: user.role }, { reason: 'Wrong password' });
+        return { success: false, error: 'Wrong password' };
+      }
 
       const formattedUser = {
         id: Number(user.id),
@@ -26,8 +35,9 @@ export const authService = {
       };
 
       localStorage.setItem('fims_current_user', JSON.stringify(formattedUser));
-      await this.logActivity(formattedUser, 'Login', 'auth', { ip: 'unknown' });
+      localStorage.setItem('fims_session_start', Date.now()); // Track session start time
 
+      await this.logEvent('auth.login_success', formattedUser, {});
       return { success: true, user: formattedUser };
     } catch (err) {
       console.error('Login error:', err);
@@ -35,11 +45,22 @@ export const authService = {
     }
   },
 
-  async logout(userId, userName) {
+  async logout(user) {
     try {
-      const user = { id: userId, name: userName };
-      if (userId) await this.logActivity(user, 'Logout', 'auth', {});
+      if (user) {
+        const sessionStart = localStorage.getItem('fims_session_start');
+        let durationSec = 0;
+        if (sessionStart) {
+          durationSec = Math.round((Date.now() - parseInt(sessionStart)) / 1000);
+        }
+        
+        await this.logEvent('auth.logout', user, { 
+          session_duration_sec: durationSec,
+          session_duration_min: Math.round(durationSec / 60)
+        });
+      }
       localStorage.removeItem('fims_current_user');
+      localStorage.removeItem('fims_session_start');
       return { success: true };
     } catch (err) {
       return { success: false };
@@ -70,18 +91,34 @@ export const authService = {
     }
   },
 
-  async logActivity(user, action, action_type, metadata = {}) {
+  // The Universal Event Logger
+  async logEvent(eventType, actor, metadata = {}) {
     try {
-      await supabase.from('fims_logs').insert([{
-        user_id: Number(user.id) || null,
-        user_name: user.name || 'System',
-        action: action,
-        action_type: action_type,
-        detail: typeof metadata === 'string' ? metadata : JSON.stringify(metadata),
+      let ip = 'unknown';
+      let userAgent = 'unknown';
+
+      // Fetch IP and User Agent only if in browser
+      if (typeof window !== 'undefined') {
+        userAgent = navigator.userAgent;
+        // Basic IP fetch (can be slow, so we don't block the UI)
+        try {
+          const res = await fetch('https://api.ipify.org?format=json');
+          const data = await res.json();
+          ip = data.ip || 'unknown';
+        } catch (e) { ip = 'local_or_blocked'; }
+      }
+
+      await supabase.from('fims_events').insert([{
+        event_type: eventType,
+        actor_id: actor?.id || null,
+        actor_name: actor?.name || 'System',
+        actor_role: actor?.role || null,
+        ip_address: ip,
+        user_agent: userAgent,
         metadata: metadata
       }]);
     } catch (err) {
-      console.error('Error saving log:', err);
+      console.error('Event logging error:', err);
     }
   }
 };

@@ -4,6 +4,7 @@ import { Icon } from "../lib/icons";
 import { calcScore, isItemComplete, getCategoryHealth, generateAISummary } from "../lib/helpers";
 import { getClientTemplate } from "../data/constants";
 import { supabase } from "../lib/supabase";
+import { authService } from "../services/authService";
 import SignaturePad from "../components/SignaturePad";
 import PhotoUploader from "../components/PhotoUploader";
 import VoiceInput from "../components/VoiceInput";
@@ -167,8 +168,41 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
     setTimeout(() => setSaved(false), 2000);
   };
 
+  // Haversine formula to calculate distance between two GPS points (in meters)
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; 
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; 
+  };
+
   const handleSubmit = () => {
     const errors = [];
+    
+    // Geofencing & GPS Validation
+    if (!gpsCoords) {
+      errors.push({ section: 'GPS Location', id: 'gps', errors: ['GPS location is mandatory to submit the inspection.'] });
+    } else {
+      const [inspLat, inspLon] = gpsCoords.split(',').map(Number);
+      if (safeInspection.loc_latitude && safeInspection.loc_longitude) {
+        const distance = calculateDistance(inspLat, inspLon, safeInspection.loc_latitude, safeInspection.loc_longitude);
+        if (distance > 500) {
+          authService.logEvent('inspection.location_anomaly', { name: 'System', role: 'inspector' }, {
+            inspection_id: safeInspection.id,
+            location: safeInspection.location_name,
+            distance_meters: Math.round(distance)
+          });
+        } else {
+          authService.logEvent('inspection.gps_validated', { name: 'System', role: 'inspector' }, {
+            inspection_id: safeInspection.id,
+            location: safeInspection.location_name,
+            distance_meters: Math.round(distance)
+          });
+        }
+      }
+    }
     
     templateSections.forEach(section => {
       const sItems = items.filter(i => i.section_id === section.id);

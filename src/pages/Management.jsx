@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Icon } from "../lib/icons";
 import { dataStore } from "../lib/dataStore";
 import { supabase } from "../lib/supabase";
+import * as XLSX from 'xlsx';
 
 export function UsersPage({ users, setUsers }) {
   const [showForm, setShowForm] = useState(false);
@@ -128,6 +129,8 @@ export function TemplatesPage() {
   const [selectedClient, setSelectedClient] = useState(null);
   const [sections, setSections] = useState([]);
   const [status, setStatus] = useState("A carregar templates...");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => { fetchClients(); }, []);
 
@@ -135,7 +138,7 @@ export function TemplatesPage() {
     const { data, error } = await supabase.from('fims_templates').select('client_name').order('client_name');
     if (error) { setStatus("Erro ao carregar clientes."); return; }
     setClients(data.map(t => t.client_name));
-    setStatus("Selecione um cliente para editar o template.");
+    setStatus("Selecione um cliente para editar o template ou faça upload de um Excel.");
   }
 
   async function loadTemplate(name) {
@@ -146,6 +149,90 @@ export function TemplatesPage() {
     setSections(data.sections || []);
     setStatus(`Pronto para editar.`);
   }
+
+  const handleExcelUpload = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    
+    setUploading(true);
+    setStatus('A processar Excel...');
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = new Uint8Array(event.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet);
+        
+        if (json.length === 0) {
+          setStatus('Erro: O ficheiro está vazio.');
+          setUploading(false);
+          return;
+        }
+
+        const keys = Object.keys(json[0]);
+        if (keys.length < 3) {
+          setStatus('Erro: O Excel precisa de pelo menos 3 colunas (Cliente, Secção, Item).');
+          setUploading(false);
+          return;
+        }
+
+        const templatesMap = {};
+        json.forEach(row => {
+          const client = String(row[keys[0]] || '').trim();
+          const section = String(row[keys[1]] || '').trim();
+          const item = String(row[keys[2]] || '').trim();
+          if (!client || !section || !item) return;
+          if (!templatesMap[client]) templatesMap[client] = {};
+          if (!templatesMap[client][section]) templatesMap[client][section] = [];
+          templatesMap[client][section].push(item);
+        });
+
+        const upserts = Object.keys(templatesMap).map(client => {
+          const secs = Object.keys(templatesMap[client]).map((secName, idx) => ({
+            id: 'sec_' + idx + '_' + Date.now(),
+            title: secName,
+            items: templatesMap[client][secName].map((itemText, i) => ({
+              id: 'item_' + idx + '_' + i + '_' + Date.now(),
+              text: itemText,
+              score: null,
+              comment: '',
+              photos: []
+            }))
+          }));
+          return {
+            client_name: client,
+            sections: secs,
+            total_items: secs.reduce((acc, s) => acc + s.items.length, 0),
+            last_updated: new Date().toISOString()
+          };
+        });
+
+        if (upserts.length === 0) {
+          setStatus('Erro: Nenhuma linha válida. Verifique se as 3 colunas têm dados.');
+          setUploading(false);
+          return;
+        }
+
+        const { error } = await supabase.from('fims_templates').upsert(upserts);
+        if (error) {
+          setStatus('Erro ao guardar no Supabase: ' + error.message);
+        } else {
+          setStatus('Sucesso! ' + upserts.length + ' templates atualizados.');
+          fetchClients();
+        }
+        setUploading(false);
+      } catch (err) {
+        console.error('Excel Parsing Error:', err);
+        setStatus('Erro ao ler o ficheiro Excel: ' + err.message);
+        setUploading(false);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
 
   const addSection = () => {
     setSections(prev => [...prev, { id: `sec_${Date.now()}`, title: "Nova Secção", items: [] }]);
@@ -214,10 +301,16 @@ export function TemplatesPage() {
 
   return (
     <div>
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <div className="page-title">📋 Templates de Inspeção</div>
           <div className="page-sub">Gerir e editar templates por cliente</div>
+        </div>
+        <div>
+          <input type="file" accept=".xlsx,.xls" ref={fileInputRef} onChange={handleExcelUpload} style={{ display: 'none' }} />
+          <button className="btn btn-primary btn-sm" onClick={() => fileInputRef.current.click()} disabled={uploading}>
+            <Icon name="upload" size={14} /> {uploading ? "A enviar..." : "Importar Excel"}
+          </button>
         </div>
       </div>
 
@@ -303,21 +396,21 @@ export function TemplatesPage() {
 }
 
 export function AuditPage({ currentUser }) {
-  const [logs, setLogs] = useState([]);
+  const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(0);
-  const [totalLogs, setTotalLogs] = useState(0);
-  const pageSize = 15;
+  const [totalEvents, setTotalEvents] = useState(0);
+  const pageSize = 20;
 
   const [filters, setFilters] = useState({ user: '', type: '', fromDate: '', toDate: '' });
 
-  const fetchLogs = async (pageNum = 0) => {
+  const fetchEvents = async (pageNum = 0) => {
     setLoading(true);
     setPage(pageNum);
-    let query = supabase.from('fims_logs').select('*', { count: 'exact' });
+    let query = supabase.from('fims_events').select('*', { count: 'exact' });
     
-    if (filters.user) query = query.ilike('user_name', '%' + filters.user + '%');
-    if (filters.type) query = query.eq('action_type', filters.type);
+    if (filters.user) query = query.ilike('actor_name', '%' + filters.user + '%');
+    if (filters.type) query = query.ilike('event_type', '%' + filters.type + '%');
     if (filters.fromDate) query = query.gte('created_at', filters.fromDate + 'T00:00:00Z');
     if (filters.toDate) query = query.lte('created_at', filters.toDate + 'T23:59:59Z');
 
@@ -325,60 +418,60 @@ export function AuditPage({ currentUser }) {
 
     const { data, count, error } = await query;
     if (!error) {
-      setLogs(data || []);
-      setTotalLogs(count || 0);
+      setEvents(data || []);
+      setTotalEvents(count || 0);
     } else {
       console.error(error);
     }
     setLoading(false);
   };
 
-  useEffect(() => { fetchLogs(0); }, []);
+  useEffect(() => { fetchEvents(0); }, []);
+
+  const formatMetadata = (metadata) => {
+    if (!metadata || Object.keys(metadata).length === 0) return '-';
+    return Object.entries(metadata).map(([key, val]) => `${key}: ${val}`).join(' | ');
+  };
 
   return (
     <div>
-      <div className="page-header"><div><div className="page-title">📜 Auditoria do Sistema</div><div className="page-sub">Registos detalhados (Retenção: 180 dias)</div></div></div>
+      <div className="page-header"><div><div className="page-title">📜 Activity Intelligence</div><div className="page-sub">User Behavior & Audit Timeline</div></div></div>
       
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-          <input className="form-input" placeholder="Nome do Utilizador..." value={filters.user} onChange={e => setFilters({...filters, user: e.target.value})} style={{ margin: 0 }} />
-          <select className="form-select" value={filters.type} onChange={e => setFilters({...filters, type: e.target.value})} style={{ margin: 0, maxWidth: 200 }}>
-            <option value="">Todos os Tipos</option>
-            <option value="auth">Autenticação</option>
-            <option value="inspection">Inspeções</option>
-            <option value="schedule">Agendamentos</option>
-            <option value="admin">Administração</option>
-          </select>
+          <input className="form-input" placeholder="User Name..." value={filters.user} onChange={e => setFilters({...filters, user: e.target.value})} style={{ margin: 0 }} />
+          <input className="form-input" placeholder="Event Type (e.g. inspection)" value={filters.type} onChange={e => setFilters({...filters, type: e.target.value})} style={{ margin: 0 }} />
           <input type="date" className="form-input" value={filters.fromDate} onChange={e => setFilters({...filters, fromDate: e.target.value})} style={{ margin: 0, maxWidth: 180 }} />
           <input type="date" className="form-input" value={filters.toDate} onChange={e => setFilters({...filters, toDate: e.target.value})} style={{ margin: 0, maxWidth: 180 }} />
-          <button className="btn btn-primary" onClick={() => fetchLogs(0)}><Icon name="filter" size={14} /> Filtrar</button>
+          <button className="btn btn-primary" onClick={() => fetchEvents(0)}><Icon name="filter" size={14} /> Filter</button>
         </div>
         
         <div style={{ overflowX: 'auto' }}>
           <table className="table">
             <thead>
               <tr>
-                <th>Data/Hora</th>
-                <th>Utilizador</th>
-                <th>Tipo</th>
-                <th>Ação</th>
-                <th>Detalhes (Metadata)</th>
+                <th>Timestamp</th>
+                <th>User</th>
+                <th>Event Type</th>
+                <th>IP Address</th>
+                <th>Device / Details</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="5" style={{ textAlign: 'center', padding: 20 }}>A carregar...</td></tr>
-              ) : logs.length === 0 ? (
-                <tr><td colSpan="5" style={{ textAlign: 'center', padding: 20, color: '#888' }}>Nenhum registo encontrado.</td></tr>
+                <tr><td colSpan="5" style={{ textAlign: 'center', padding: 20 }}>Loading...</td></tr>
+              ) : events.length === 0 ? (
+                <tr><td colSpan="5" style={{ textAlign: 'center', padding: 20, color: '#888' }}>No events found.</td></tr>
               ) : (
-                logs.map(log => (
-                  <tr key={log.id}>
-                    <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{new Date(log.created_at).toLocaleString('pt-PT')}</td>
-                    <td style={{ fontWeight: 500 }}>{log.user_name}</td>
-                    <td><span className="badge" style={{ background: '#E6F1FB', color: '#185FA5', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>{log.action_type || 'geral'}</span></td>
-                    <td>{log.action}</td>
-                    <td style={{ fontSize: 12, color: '#666', maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {log.metadata ? JSON.stringify(log.metadata) : log.detail}
+                events.map(ev => (
+                  <tr key={ev.id}>
+                    <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{new Date(ev.created_at).toLocaleString('pt-PT')}</td>
+                    <td style={{ fontWeight: 500 }}>{ev.actor_name}</td>
+                    <td><span className="badge" style={{ background: '#E6F1FB', color: '#185FA5', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>{ev.event_type}</span></td>
+                    <td style={{ fontSize: 12, color: '#666' }}>{ev.ip_address}</td>
+                    <td style={{ fontSize: 12, color: '#666', maxWidth: 400, whiteSpace: 'normal' }}>
+                      {formatMetadata(ev.metadata)}<br/>
+                      <span style={{ fontSize: 10, color: '#aaa' }}>{ev.user_agent?.substring(0, 50)}</span>
                     </td>
                   </tr>
                 ))
@@ -389,11 +482,11 @@ export function AuditPage({ currentUser }) {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
           <span style={{ fontSize: 12, color: '#888' }}>
-            Página {page + 1} de {Math.ceil(totalLogs / pageSize) || 1} ({totalLogs} registos no total)
+            Page {page + 1} of {Math.ceil(totalEvents / pageSize) || 1} ({totalEvents} events)
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-secondary btn-sm" disabled={page === 0} onClick={() => fetchLogs(page - 1)}>Anterior</button>
-            <button className="btn btn-secondary btn-sm" disabled={logs.length < pageSize} onClick={() => fetchLogs(page + 1)}>Próxima</button>
+            <button className="btn btn-secondary btn-sm" disabled={page === 0} onClick={() => fetchEvents(page - 1)}>Prev</button>
+            <button className="btn btn-secondary btn-sm" disabled={events.length < pageSize} onClick={() => fetchEvents(page + 1)}>Next</button>
           </div>
         </div>
       </div>
