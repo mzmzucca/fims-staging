@@ -1,4 +1,3 @@
-// /src/context/CommsContext.jsx
 import { createContext, useContext, useState, useEffect } from "react";
 import { genId } from "../lib/helpers";
 import { supabase } from "../lib/supabase";
@@ -12,7 +11,6 @@ export function CommsProvider({ children }) {
   const [draft, setDraft] = useState("");
 
   useEffect(() => {
-    // 1. Fetch existing notifications and messages
     const fetchInitialData = async () => {
       const { data: notifs } = await supabase.from('fims_notifications').select('*').order('timestamp', { ascending: false });
       if (notifs) setNotifications(notifs);
@@ -22,17 +20,17 @@ export function CommsProvider({ children }) {
     };
     fetchInitialData();
 
-    // 2. Subscribe to Realtime notifications
+    // Realtime for Notifications
     const notifChannel = supabase
-      .channel('notif-channel')
+      .channel('notif-realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'fims_notifications' }, payload => {
         setNotifications(prev => [payload.new, ...prev]);
       })
       .subscribe();
 
-    // 3. Subscribe to Realtime messages
+    // Realtime for Messages
     const msgChannel = supabase
-      .channel('msg-channel')
+      .channel('msg-realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'fims_messages' }, payload => {
         setMessages(prev => [...prev, payload.new]);
       })

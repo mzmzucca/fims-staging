@@ -60,7 +60,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     if (!loc) return;
     
     const inspector = users.find(u => u.id === Number(inspectorId)) || null;
-    const template = getClientTemplate(loc.name);
+    const template = getTemplate(loc.name);
     const templateSections = template.sections || [];
     
     const items = templateSections.flatMap(s => 
@@ -123,7 +123,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
             <div style={{ background: '#F3F4F6', padding: '10px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>📋 Template:</span>
-                <span style={{ fontWeight: 500 }}>{getClientTemplate(selectedClient.name).clientName || 'Padrão'}</span>
+                <span style={{ fontWeight: 500 }}>{getTemplate(selectedClient.name).clientName || 'Padrão'}</span>
               </div>
             </div>
           )}
@@ -165,7 +165,14 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  const syncInspectionToSupabase = async (insp) => {
+  
+// Case-insensitive template getter
+const getTemplate = (name) => {
+  const templates = JSON.parse(localStorage.getItem('fims_templates') || '{}');
+  return templates[name.toLowerCase()] || { sections: [], totalItems: 0 };
+};
+
+const syncInspectionToSupabase = async (insp) => {
     try {
       const safeInsp = {
         id: String(insp.id),
@@ -217,7 +224,7 @@ function AppContent() {
             }
             if (!Array.isArray(parsedSections)) parsedSections = [];
             
-            templateMap[t.client_name] = {
+            templateMap[t.client_name.toLowerCase()] = {
               sections: parsedSections,
               clientName: t.client_name,
               totalItems: t.total_items || 0
@@ -374,7 +381,7 @@ function AppContent() {
 
   const handleCreateSchedule = (tasks) => {
     const tasksWithTemplates = tasks.map(task => { 
-      const t = getClientTemplate(task.location_name); 
+      const t = getTemplate(task.location_name); 
       const tSections = t.sections || [];
       return { 
         ...task, 
@@ -395,7 +402,7 @@ function AppContent() {
 
   const handleBulkSchedule = (tasks) => {
     const tasksWithTemplates = tasks.map(task => { 
-      const t = getClientTemplate(task.location_name); 
+      const t = getTemplate(task.location_name); 
       const tSections = t.sections || [];
       return { 
         ...task, 

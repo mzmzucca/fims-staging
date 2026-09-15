@@ -9,13 +9,12 @@ export default function PhotoUploader({ photos, onAdd, onRemove }) {
     if (!file) return;
     setCompressing(true);
     
-    // Compress image to Base64
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 800; // Resize to max 800px width to keep DB small
+        const MAX_WIDTH = 800; 
         const scale = MAX_WIDTH / img.width;
         canvas.width = MAX_WIDTH;
         canvas.height = img.height * scale;
@@ -23,7 +22,6 @@ export default function PhotoUploader({ photos, onAdd, onRemove }) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         
-        // Convert to JPEG at 70% quality
         const base64 = canvas.toDataURL('image/jpeg', 0.7);
         onAdd(base64);
         setCompressing(false);
@@ -31,39 +29,57 @@ export default function PhotoUploader({ photos, onAdd, onRemove }) {
       img.src = event.target.result;
     };
     reader.readAsDataURL(file);
-    e.target.value = ''; // Reset input
+    e.target.value = ''; 
   };
 
   return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
       {photos.map((p, i) => (
-        <div key={i} style={{ position: 'relative', width: 60, height: 60 }}>
-          <img src={p} alt="Evidence" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} />
+        <div key={i} style={{ position: 'relative', width: 80, height: 80 }}>
+          <img src={p} alt="Evidence" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, border: '1px solid #e2e8f0' }} />
           <button 
             onClick={() => onRemove(i)} 
             style={{ 
-              position: 'absolute', top: -4, right: -4, background: '#DC2626', color: '#fff', 
-              borderRadius: '50%', width: 18, height: 18, border: 'none', cursor: 'pointer', 
+              position: 'absolute', top: -4, right: -4, background: '#dc2626', color: '#fff', 
+              borderRadius: '50%', width: 20, height: 20, border: 'none', cursor: 'pointer', 
               display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 
             }}
           >
-            <Icon name="x" size={10} />
+            <Icon name="x" size={12} />
           </button>
         </div>
       ))}
       
-      {photos.length < 4 && (
-        <label style={{ 
-          width: 60, height: 60, border: '2px dashed #ccc', borderRadius: 6, 
-          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' 
-        }}>
-          {compressing ? (
-            <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }}></div>
-          ) : (
+      {photos.length < 4 && !compressing && (
+        <div style={{ display: 'flex', gap: 8 }}>
+          {/* Camera Button */}
+          <label style={{ 
+            width: 80, height: 80, border: '2px dashed #cbd5e1', borderRadius: 8, 
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+            color: '#64748b', backgroundColor: '#f8fafc'
+          }}>
             <Icon name="camera" size={20} />
-          )}
-          <input type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: 'none' }} />
-        </label>
+            <span style={{ fontSize: 10, marginTop: 4 }}>Camera</span>
+            <input type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: 'none' }} />
+          </label>
+
+          {/* Gallery Button */}
+          <label style={{ 
+            width: 80, height: 80, border: '2px dashed #cbd5e1', borderRadius: 8, 
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+            color: '#64748b', backgroundColor: '#f8fafc'
+          }}>
+            <Icon name="upload" size={20} />
+            <span style={{ fontSize: 10, marginTop: 4 }}>Gallery</span>
+            <input type="file" accept="image/*" onChange={handleFile} style={{ display: 'none' }} />
+          </label>
+        </div>
+      )}
+
+      {compressing && (
+        <div style={{ width: 80, height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="spinner" style={{ width: 24, height: 24, borderWidth: 3 }}></div>
+        </div>
       )}
     </div>
   );

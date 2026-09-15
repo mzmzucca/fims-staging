@@ -1,6 +1,7 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Icon } from "../lib/icons";
 import { calcScore, getCategoryHealth, generateAISummary } from "../lib/helpers";
+import { supabase } from "../lib/supabase";
 import StatusBadge from "../components/StatusBadge";
 import ScoreRing from "../components/ScoreRing";
 import PrintableReport from "../components/PrintableReport";
@@ -8,9 +9,41 @@ import PrintableReport from "../components/PrintableReport";
 export default function InspectionDetail({ inspection, currentUser, onBack, onUpdate, addAuditLog, allInspections }) {
   const [showPDF, setShowPDF] = useState(false);
   const reportRef = useRef(null);
+  const [displayInspection, setDisplayInspection] = useState(inspection);
 
-  if (!inspection) return null;
-  const safeInspection = Array.isArray(inspection) ? inspection[0] : inspection;
+  useEffect(() => {
+    async function fetchMissingTemplate() {
+      if (inspection && (!inspection.items || inspection.items.length === 0) && inspection.location_name) {
+        const { data } = await supabase.from('fims_templates').select('sections').eq('client_name', inspection.location_name).single();
+        if (data && data.sections && data.sections.length > 0) {
+          const newItems = data.sections.flatMap(s => 
+            (s.items || s.itens || []).map(item => ({ 
+              ...item, 
+              section_id: s.id, 
+              score: null, 
+              comment: "", 
+              photos: [] 
+            }))
+          );
+          const newSections = data.sections.map(s => ({ 
+            id: s.id, 
+            title: s.title || s.name,
+            observation: "", 
+            photos: [] 
+          }));
+          setDisplayInspection({ ...inspection, items: newItems, sections: newSections });
+        } else {
+          setDisplayInspection(inspection);
+        }
+      } else {
+        setDisplayInspection(inspection);
+      }
+    }
+    fetchMissingTemplate();
+  }, [inspection]);
+
+  if (!displayInspection) return null;
+  const safeInspection = Array.isArray(displayInspection) ? displayInspection[0] : displayInspection;
 
   const handleDownloadPDF = () => {
     setShowPDF(true);
@@ -44,8 +77,16 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
     const qualityScore = scoredItems.length > 0 ? (scoredItems.reduce((acc, i) => acc + i.score, 0) / scoredItems.length).toFixed(1) : '0.0';
     const issues = items.filter(i => i.score !== null && i.score <= 3);
 
+    // Bulletproof grouping for Word export
+    const grouped = {};
+    items.forEach(it => {
+      const secId = it.section_id || 'uncategorized';
+      if (!grouped[secId]) grouped[secId] = [];
+      grouped[secId].push(it);
+    });
+
     let areasHTML = sections.map(sec => {
-      const secItems = items.filter(it => it.section_id === sec.id);
+      const secItems = grouped[sec.id] || [];
       const secScored = secItems.filter(i => i.score !== null);
       const secAvg = secScored.length > 0 ? (secScored.reduce((acc, i) => acc + i.score, 0) / secScored.length).toFixed(1) : 'N/A';
       const secPhotos = sec.photos || [];
@@ -91,7 +132,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
 
     let findingsHTML = issues.length > 0 ? `
       <div style="margin-bottom:30px;">
-        <div style="background-color:#FEE2E2;color:#991B1B;padding:8px 12px;font-weight:700;font-size:12pt;border-radius:4px 4px 0 0;">⚠️ Issues Requiring Attention</div>
+        <div style="background-color:#FEE2E2;color:#991B1B;padding:8px 12px;font-weight:700;font-size:12pt;border-radius:4px 4px 0 0;">Issues Requiring Attention</div>
         <table style="width:100%;border-collapse:collapse;font-size:10pt;border:1px solid #FECACA;">
           <tbody>
             ${issues.map(issue => `
@@ -173,6 +214,25 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
 
   const aiSummary = generateAISummary(safeInspection.items || [], safeInspection.location_name);
 
+  // BULLETPROOF GROUPING LOGIC FOR UI
+  const items = safeInspection.items || [];
+  const sections = safeInspection.sections || [];
+  const groupedItems = {};
+  items.forEach(it => {
+    const secId = it.section_id || 'uncategorized';
+    if (!groupedItems[secId]) groupedItems[secId] = [];
+    groupedItems[secId].push(it);
+  });
+
+  let sectionsToRender = [...sections];
+  if (groupedItems['uncategorized'] && groupedItems['uncategorized'].length > 0) {
+    sectionsToRender.push({ id: 'uncategorized', title: 'General Items' });
+  }
+  if (sectionsToRender.length === 0 && items.length > 0) {
+    sectionsToRender = [{ id: 'all', title: 'Checklist Items' }];
+    groupedItems['all'] = items;
+  }
+
   return (
     <div>
       <div className="page-header" style={{ flexWrap: "wrap", gap: "16px", display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -197,10 +257,9 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
         <p style={{ fontSize: 13, color: "#444", lineHeight: 1.5 }}>{aiSummary.summary}</p>
       </div>
 
-      {/* RENDER SECTIONS, ITEMS, AND PHOTOS IN APP UI */}
       <div style={{ marginBottom: 16 }}>
-        {(safeInspection.sections || []).map((sec, i) => {
-          const secItems = (safeInspection.items || []).filter(it => it.section_id === sec.id);
+        {sectionsToRender.map(sec => {
+          const secItems = groupedItems[sec.id] || [];
           const secPhotos = sec.photos || [];
           return (
             <div key={sec.id} className="card" style={{ marginBottom: 12, padding: 0, overflow: 'hidden' }}>
@@ -215,7 +274,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
                   </div>
                 ))}
                 
-                {/* Render Photos in App UI */}
                 {secPhotos.length > 0 && (
                   <div style={{ marginTop: '15px' }}>
                     <div style={{ fontSize: '11px', fontWeight: 700, color: '#888', marginBottom: '8px' }}>PHOTO EVIDENCE</div>
@@ -232,7 +290,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
         })}
       </div>
 
-      {/* PDF RENDERER */}
       <div style={{ position: 'fixed', left: '-10000px', top: 0, width: '210mm', backgroundColor: '#fff' }}>
         {showPDF && <PrintableReport ref={reportRef} inspection={safeInspection} />}
       </div>
