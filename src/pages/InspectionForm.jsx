@@ -95,7 +95,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
   useEffect(() => {
     async function fetchMissingTemplate() {
       if (items.length <= 2 && safeInspection.location_name) {
-        const { data } = await supabase.from('fims_templates').select('sections').ilike('client_name', safeInspection.location_name).single();
+        const { data } = await supabase.from('fims_templates').select('sections').eq('client_name', safeInspection.location_name).single();
         if (data && data.sections && data.sections.length > 0) {
           const newItems = data.sections.flatMap(s => 
             (s.items || s.itens || []).map(item => ({ 

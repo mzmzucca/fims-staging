@@ -57,13 +57,13 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     }
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!locId) return;
     const loc = locations.find(l => l.id === Number(locId));
     if (!loc) return;
     
     const inspector = users.find(u => u.id === Number(inspectorId)) || null;
-    const template = getClientTemplate(loc.name);
+    const template = await fetchTemplate(loc.name);
     const templateSections = template.sections || [];
     
     const items = templateSections.flatMap(s => 
@@ -247,8 +247,8 @@ function AppContent() {
             };
             clientList.push(t.client_name);
           });
-          localStorage.setItem('fims_templates', JSON.stringify(templateMap));
-          localStorage.setItem('fims_template_clients', JSON.stringify(clientList));
+          
+          
         }
 
         const { data: supabaseInspections, error } = await supabase.from('fims_inspections').select('*');
