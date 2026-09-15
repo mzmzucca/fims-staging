@@ -89,11 +89,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
   const currentTemplate = getClientTemplate(safeInspection.location_name);
   const templateSections = currentTemplate.sections || [];
 
-  useEffect(() => {
-    if (templateSections.length > 0 && expandedSections.length === 0) {
-      setExpandedSections([templateSections[0].id]);
-    }
-  }, [templateSections]);
+  // All sections start collapsed by default
 
   // Fetch real template from Supabase if inspection is missing items
   useEffect(() => {
@@ -266,7 +262,13 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
   };
 
   const toggleSection = (secId) => {
-    setExpandedSections(prev => prev.includes(secId) ? prev.filter(id => id !== secId) : [...prev, secId]);
+    setExpandedSections(prev => {
+      if (prev.includes(secId)) {
+        return prev.filter(id => id !== secId);
+      } else {
+        return [...prev, secId];
+      }
+    });
   };
 
   const aiSummary = generateAISummary(items, safeInspection.location_name);
