@@ -63,7 +63,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     if (!loc) return;
     
     const inspector = users.find(u => u.id === Number(inspectorId)) || null;
-    const template = await fetchTemplate(loc.name);
+    const template = getTemplate(loc.name);
     const templateSections = template.sections || [];
     
     const items = templateSections.flatMap(s => 
@@ -149,6 +149,7 @@ function AppContent() {
   const [inspections, setInspections] = useState([]);
   const [users, setUsers] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [templates, setTemplates] = useState({});
   const [auditLogs, setAuditLogs] = useState([]);
   const [viewingInspection, setViewingInspection] = useState(null);
   const [editingInspection, setEditingInspection] = useState(null);
@@ -228,6 +229,20 @@ function AppContent() {
 
         const { data: dbLocations } = await supabase.from('fims_locations').select('*').order('name', { ascending: true });
         if (dbLocations && dbLocations.length > 0) setLocations(dbLocations);
+
+        const { data: dbTemplates } = await supabase.from('fims_templates').select('*');
+        if (dbTemplates && dbTemplates.length > 0) {
+          const templateMap = {};
+          dbTemplates.forEach(t => {
+            let parsedSections = t.sections;
+            if (typeof parsedSections === 'string') {
+              try { parsedSections = JSON.parse(parsedSections); } catch (e) { parsedSections = []; }
+            }
+            if (!Array.isArray(parsedSections)) parsedSections = [];
+            templateMap[t.client_name.toLowerCase().trim()] = { sections: parsedSections, clientName: t.client_name, totalItems: t.total_items || 0 };
+          });
+          setTemplates(templateMap);
+        }
 
         const { data: dbTemplates } = await supabase.from('fims_templates').select('*');
         if (dbTemplates && dbTemplates.length > 0) {

@@ -91,34 +91,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
 
   // All sections start collapsed by default
 
-  // Fetch real template from Supabase if inspection is missing items
-  useEffect(() => {
-    async function fetchMissingTemplate() {
-      if (items.length <= 2 && safeInspection.location_name) {
-        const { data } = await supabase.from('fims_templates').select('sections').eq('client_name', safeInspection.location_name).single();
-        if (data && data.sections && data.sections.length > 0) {
-          const newItems = data.sections.flatMap(s => 
-            (s.items || s.itens || []).map(item => ({ 
-              ...item, 
-              section_id: s.id, 
-              score: null, 
-              comment: "", 
-              photos: [] 
-            }))
-          );
-          const newSections = data.sections.map(s => ({ 
-            id: s.id, 
-            title: s.title || s.name,
-            observation: "", 
-            photos: [] 
-          }));
-          setItems(newItems);
-          setSections(newSections);
-        }
-      }
-    }
-    fetchMissingTemplate();
-  }, [safeInspection.id]);
+  // Items are now populated correctly on creation
 
   useEffect(() => {
     const draftData = { items, sections, notes, clientMgrName, inspectorSig, clientSig };
