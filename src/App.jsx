@@ -1,3 +1,4 @@
+cat > src/App.jsx << 'ENDOFFILE'
 // /src/App.jsx
 import { useState, useEffect } from "react";
 import { Icon } from "./lib/icons";
@@ -41,6 +42,16 @@ const STORAGE_KEYS = {
   MESSAGES_DRAFT: "fims_messages_draft",
 };
 
+function getTemplateFromStorage(name) {
+  if (!name) return { sections: [], totalItems: 0 };
+  try {
+    const templates = JSON.parse(localStorage.getItem('fims_templates') || '{}');
+    return templates[name.toLowerCase().trim()] || { sections: [], totalItems: 0 };
+  } catch (e) {
+    return { sections: [], totalItems: 0 };
+  }
+}
+
 function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }) {
   const [locId, setLocId] = useState("");
   const [inspectorId, setInspectorId] = useState(currentUser.role === ROLES.INSPECTOR ? currentUser.id : "");
@@ -61,28 +72,28 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     if (!locId) return;
     const loc = locations.find(l => l.id === Number(locId));
     if (!loc) return;
-    
+
     const inspector = users.find(u => u.id === Number(inspectorId)) || null;
-    const template = getTemplate(loc.name);
+    const template = getTemplateFromStorage(loc.name);
     const templateSections = template.sections || [];
-    
-    const items = templateSections.flatMap(s => 
-      (s.items || s.itens || []).map(item => ({ 
-        ...item, 
-        section_id: s.id, 
-        score: null, 
-        comment: "", 
-        photos: [] 
+
+    const items = templateSections.flatMap(s =>
+      (s.items || s.itens || []).map(item => ({
+        ...item,
+        section_id: s.id,
+        score: null,
+        comment: "",
+        photos: []
       }))
     );
-    
-    const sections = templateSections.map(s => ({ 
-      id: s.id, 
+
+    const sections = templateSections.map(s => ({
+      id: s.id,
       title: s.title || s.name,
-      observation: "", 
-      photos: [] 
+      observation: "",
+      photos: []
     }));
-    
+
     const insp = {
       id: genId(),
       location_id: loc.id,
@@ -143,7 +154,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
 
 function AppContent() {
   const { notify } = useComms();
-  
+
   const [currentUser, setCurrentUser] = useState(null);
   const [page, setPage] = useState("dashboard");
   const [inspections, setInspections] = useState([]);
@@ -153,7 +164,7 @@ function AppContent() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [viewingInspection, setViewingInspection] = useState(null);
   const [editingInspection, setEditingInspection] = useState(null);
-  
+
   const [showNewModal, setShowNewModal] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -199,21 +210,21 @@ function AppContent() {
 
   const getTemplate = (name) => {
     const templates = JSON.parse(localStorage.getItem('fims_templates') || '{}');
-    return templates[name.toLowerCase()] || { sections: [], totalItems: 0 };
+    return templates[name.toLowerCase().trim()] || { sections: [], totalItems: 0 };
   };
 
   const getFilteredInspections = () => {
     if (!currentUser) return [];
     if (currentUser.role === 'admin' || currentUser.role === 'ceo') return inspections;
-    
+
     return inspections.filter(i => {
       if (i.type === 'leave' && currentUser.role !== 'inspector') return false;
       if (currentUser.role === 'inspector') {
-        return String(i.inspector_id) === String(currentUser.id) || 
+        return String(i.inspector_id) === String(currentUser.id) ||
                (i.inspector_name && i.inspector_name.toLowerCase() === currentUser.name.toLowerCase());
       }
       if (currentUser.role === 'supervisor') {
-        return String(i.supervisor_id) === String(currentUser.id) || 
+        return String(i.supervisor_id) === String(currentUser.id) ||
                (i.supervisor_name && i.supervisor_name.toLowerCase() === currentUser.name.toLowerCase()) ||
                !i.supervisor_id;
       }
@@ -230,20 +241,7 @@ function AppContent() {
         const { data: dbLocations } = await supabase.from('fims_locations').select('*').order('name', { ascending: true });
         if (dbLocations && dbLocations.length > 0) setLocations(dbLocations);
 
-        const { data: dbTemplates } = await supabase.from('fims_templates').select('*');
-        if (dbTemplates && dbTemplates.length > 0) {
-          const templateMap = {};
-          dbTemplates.forEach(t => {
-            let parsedSections = t.sections;
-            if (typeof parsedSections === 'string') {
-              try { parsedSections = JSON.parse(parsedSections); } catch (e) { parsedSections = []; }
-            }
-            if (!Array.isArray(parsedSections)) parsedSections = [];
-            templateMap[t.client_name.toLowerCase().trim()] = { sections: parsedSections, clientName: t.client_name, totalItems: t.total_items || 0 };
-          });
-          setTemplates(templateMap);
-        }
-
+        // ---- SINGLE templates fetch (duplicate removed) ----
         const { data: dbTemplates } = await supabase.from('fims_templates').select('*');
         if (dbTemplates && dbTemplates.length > 0) {
           const templateMap = {};
@@ -254,17 +252,23 @@ function AppContent() {
               try { parsedSections = JSON.parse(parsedSections); } catch (e) { parsedSections = []; }
             }
             if (!Array.isArray(parsedSections)) parsedSections = [];
-            
-            templateMap[t.client_name.toLowerCase()] = {
+
+            const key = (t.client_name || '').toLowerCase().trim();
+            if (!key) return;
+
+            templateMap[key] = {
               sections: parsedSections,
               clientName: t.client_name,
               totalItems: t.total_items || 0
             };
             clientList.push(t.client_name);
           });
-          
-          
+
+          setTemplates(templateMap);
+          localStorage.setItem('fims_templates', JSON.stringify(templateMap));
+          localStorage.setItem('fims_template_clients', JSON.stringify(clientList));
         }
+        // ---- end templates ----
 
         const { data: supabaseInspections, error } = await supabase.from('fims_inspections').select('*');
         if (!error && supabaseInspections) {
@@ -337,7 +341,7 @@ function AppContent() {
     setEditingInspection(null);
     if (p === "new-inspection") setShowNewModal(true);
   };
-  
+
   const handleViewInspection = (insp) => { setViewingInspection(insp); setEditingInspection(null); setPage("inspections"); };
   const handleStartInspection = (insp) => {
     let updated = { ...insp };
@@ -348,19 +352,19 @@ function AppContent() {
     setViewingInspection(null);
     setPage("inspections");
   };
-  
+
   const handleSaveInspection = (updated) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     syncInspectionToSupabase(updated);
     setEditingInspection(updated);
   };
-  
+
   const handleSubmitInspection = async (updated) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     await syncInspectionToSupabase(updated);
     setEditingInspection(null);
     setPage("inspections");
-    
+
     const lowScoreItems = (updated.items || []).filter(i => i.score !== null && i.score <= 2);
     if (lowScoreItems.length > 0) {
       const dueDate = new Date();
@@ -376,10 +380,10 @@ function AppContent() {
       await supabase.from('fims_capas').insert(capas);
       authService.logEvent('capa.auto_generated', currentUser, { inspection_id: updated.id, location: updated.location_name, count: capas.length });
     }
-    
+
     notify(updated.supervisor_id, `Nova inspeção submetida por ${currentUser.name} para ${updated.location_name}.`, "inspections");
   };
-  
+
   const handleCreateInspection = async (insp) => {
     setInspections(prev => [insp, ...prev]);
     const success = await syncInspectionToSupabase(insp);
@@ -389,7 +393,7 @@ function AppContent() {
     setEditingInspection(insp);
     setPage("inspections");
   };
-  
+
   const handleUpdateInspection = (updated) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     syncInspectionToSupabase(updated);
@@ -397,23 +401,23 @@ function AppContent() {
   };
 
   const handleCreateSchedule = async (tasks) => {
-    const tasksWithTemplates = tasks.map(task => { 
-      const t = getTemplate(task.location_name); 
+    const tasksWithTemplates = tasks.map(task => {
+      const t = getTemplate(task.location_name);
       const tSections = t.sections || [];
-      return { 
-        ...task, 
+      return {
+        ...task,
         supervisor_id: currentUser.id,
         supervisor_name: currentUser.name,
         items: tSections.flatMap(s => {
           const sectionItems = s.items || s.itens || [];
           return sectionItems.map(i => ({...i, section_id:s.id, score:null, comment:"", photos:[]}));
-        }), 
-        sections: tSections.map(s => ({id:s.id, title: s.title || s.name, observation:"", photos:[]})) 
-      }; 
+        }),
+        sections: tSections.map(s => ({id:s.id, title: s.title || s.name, observation:"", photos:[]}))
+      };
     });
-    
+
     setInspections(prev => [...tasksWithTemplates, ...prev]);
-    
+
     for (const t of tasksWithTemplates) {
       const success = await syncInspectionToSupabase(t);
       if(!success) alert("Erro ao salvar inspeção agendada. Verifique o console (F12).");
@@ -423,19 +427,19 @@ function AppContent() {
   };
 
   const handleBulkSchedule = async (tasks) => {
-    const tasksWithTemplates = tasks.map(task => { 
-      const t = getTemplate(task.location_name); 
+    const tasksWithTemplates = tasks.map(task => {
+      const t = getTemplate(task.location_name);
       const tSections = t.sections || [];
-      return { 
-        ...task, 
+      return {
+        ...task,
         supervisor_id: currentUser.id,
         supervisor_name: currentUser.name,
         items: tSections.flatMap(s => {
           const sectionItems = s.items || s.itens || [];
           return sectionItems.map(i => ({...i, section_id:s.id, score:null, comment:"", photos:[]}));
-        }), 
-        sections: tSections.map(s => ({id:s.id, title: s.title || s.name, observation:"", photos:[]})) 
-      }; 
+        }),
+        sections: tSections.map(s => ({id:s.id, title: s.title || s.name, observation:"", photos:[]}))
+      };
     });
     setInspections(prev => [...tasksWithTemplates, ...prev]);
     for (const t of tasksWithTemplates) {
@@ -499,10 +503,10 @@ function AppContent() {
             currentUser.role === ROLES.CEO || currentUser.role === ROLES.ADMIN ? <CEODashboard inspections={filteredInspections} locations={locations} auditLogs={auditLogs} currentUser={currentUser} /> :
             currentUser.role === ROLES.SUPERVISOR ? <SupervisorDashboard inspections={filteredInspections} users={users} currentUser={currentUser} onView={handleViewInspection} /> :
             <InspectorDashboard inspections={filteredInspections} users={users} currentUser={currentUser} onStartInspection={handleStartInspection} onAcceptTask={handleAcceptTask} onDeclineTask={handleDeclineTask} onRequestLeave={handleRequestLeave} />
-          ) : page === "inspections" ? <InspectionsList inspections={filteredInspections} currentUser={currentUser} onView={handleViewInspection} onCreate={() => setShowNewModal(true)} /> 
-          : page === "report_center" ? <ReportCenter inspections={filteredInspections} locations={locations} users={users} /> 
-          : page === "messages" ? <Messages users={users} currentUser={currentUser} /> 
-          : page === "alerts" ? <Alerts inspections={filteredInspections} onView={handleViewInspection} onUpdate={handleUpdateInspection} /> 
+          ) : page === "inspections" ? <InspectionsList inspections={filteredInspections} currentUser={currentUser} onView={handleViewInspection} onCreate={() => setShowNewModal(true)} />
+          : page === "report_center" ? <ReportCenter inspections={filteredInspections} locations={locations} users={users} />
+          : page === "messages" ? <Messages users={users} currentUser={currentUser} />
+          : page === "alerts" ? <Alerts inspections={filteredInspections} onView={handleViewInspection} onUpdate={handleUpdateInspection} />
           : page === "schedule" ? (
             <div>
               <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
@@ -510,19 +514,19 @@ function AppContent() {
               </div>
               <Schedule inspections={filteredInspections} users={users} onUpdate={handleDragUpdate} onOpenModal={() => setShowScheduleModal(true)} onReschedule={setReschedulingTask} onBulkSchedule={() => setShowBulkModal(true)} />
             </div>
-          ) : page === "field_map" ? <LiveMap inspections={filteredInspections} users={users} onRefresh={async () => { return; }} refreshIntervalMs={45000} /> 
-          : page === "team" ? <Team users={users} inspections={filteredInspections} /> 
-          : page === "monthly_report" ? <MonthlyReport inspections={filteredInspections} locations={locations} /> 
-          : page === "reports" ? <ReportsPage inspections={filteredInspections} locations={locations} users={users} /> 
-          : page === "users" ? <UsersPage users={users} setUsers={setUsers} /> 
-          : page === "locations" ? <LocationsPage locations={locations} setLocations={setLocations} users={users} inspections={filteredInspections} /> 
-          : page === "templates" ? <TemplatesPage /> 
-          : page === "audit" ? <AuditPage currentUser={currentUser} /> 
+          ) : page === "field_map" ? <LiveMap inspections={filteredInspections} users={users} onRefresh={async () => { return; }} refreshIntervalMs={45000} />
+          : page === "team" ? <Team users={users} inspections={filteredInspections} />
+          : page === "monthly_report" ? <MonthlyReport inspections={filteredInspections} locations={locations} />
+          : page === "reports" ? <ReportsPage inspections={filteredInspections} locations={locations} users={users} />
+          : page === "users" ? <UsersPage users={users} setUsers={setUsers} />
+          : page === "locations" ? <LocationsPage locations={locations} setLocations={setLocations} users={users} inspections={filteredInspections} />
+          : page === "templates" ? <TemplatesPage />
+          : page === "audit" ? <AuditPage currentUser={currentUser} />
           : page === "settings" ? <SettingsPage inspections={inspections} onDeleteInspection={async (id) => {
             if (!window.confirm('Delete this inspection permanently?')) return;
             setInspections(prev => prev.filter(i => i.id !== id));
             await supabase.from('fims_inspections').delete().eq('id', id);
-          }} /> 
+          }} />
           : null}
         </div>
       </div>
@@ -547,3 +551,4 @@ export default function App() {
     </LangProvider>
   );
 }
+ENDOFFILE
