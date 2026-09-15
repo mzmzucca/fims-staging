@@ -186,7 +186,6 @@ const syncInspectionToSupabase = async (insp) => {
         accepted: insp.accepted,
         score_pct: insp.score_pct,
         date: insp.date,
-        start_time: insp.start_time,
         items: insp.items,
         sections: insp.sections,
         notes: insp.notes,
@@ -194,9 +193,20 @@ const syncInspectionToSupabase = async (insp) => {
         type: insp.type,
         priority: insp.priority,
         template_id: insp.template_id,
-        template_version: insp.template_version,
-        started_at: insp.started_at || null
+        template_version: insp.template_version
       };
+      const { data, error } = await supabase.from('fims_inspections').upsert(safeInsp).select();
+      if (error) {
+        console.error("🔴 SUPABASE SAVE ERROR:", error.message, "Payload:", safeInsp);
+        return false;
+      }
+      console.log("✅ SUPABASE SAVE SUCCESS:", data);
+      return true;
+    } catch (err) {
+      console.error("Supabase sync error:", err);
+      return false;
+    }
+  };
       const { error } = await supabase.from('fims_inspections').upsert(safeInsp);
       if (error) console.error("Supabase inspection sync error:", error.message);
     } catch (err) {
@@ -405,7 +415,7 @@ const getFilteredInspections = () => {
     if (viewingInspection) setViewingInspection(updated);
   };
 
-  const handleCreateSchedule = (tasks) => {
+  const handleCreateSchedule = async (tasks) => {
     const tasksWithTemplates = tasks.map(task => { 
       const t = getTemplate(task.location_name); 
       const tSections = t.sections || [];
@@ -418,11 +428,18 @@ const getFilteredInspections = () => {
         sections: tSections.map(s => ({id:s.id, title: s.title || s.name, observation:"", photos:[]})) 
       }; 
     });
-    setInspections(prev => [...tasksWithTemplates, ...prev]);
+    
+    // Override supervisor ID with the currently logged-in user
     tasksWithTemplates.forEach(t => {
-      syncInspectionToSupabase(t);
-      if(t.inspector_id) notify(t.inspector_id, `Nova tarefa agendada para ${t.date} no local ${t.location_name}.`, "schedule");
+      t.supervisor_id = currentUser.id;
+      t.supervisor_name = currentUser.name;
     });
+    setInspections(prev => [...tasksWithTemplates, ...prev]);
+    for (const t of tasksWithTemplates) {
+      const success = await syncInspectionToSupabase(t);
+      if(!success) alert("Erro ao salvar inspeção no Supabase. Verifique o console (F12).");
+      if(t.inspector_id) notify(t.inspector_id, `Nova tarefa agendada para ${t.date} no local ${t.location_name}.`, "schedule");
+    }
     setShowScheduleModal(false);
   };
 
