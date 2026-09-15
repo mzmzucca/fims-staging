@@ -86,8 +86,8 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
       location_name: loc.name,
       inspector_id: inspector ? inspector.id : null,
       inspector_name: inspector ? inspector.name : null,
-      supervisor_id: 3,
-      supervisor_name: "Ana Sitoe",
+      supervisor_id: currentUser.id,
+      supervisor_name: currentUser.name,
       status: inspector ? "pending_acceptance" : "unassigned",
       accepted: null,
       score_pct: null,
@@ -290,6 +290,32 @@ const syncInspectionToSupabase = async (insp) => {
     setPage("dashboard");
   };
 
+
+// Privacy Filter: Ensure users only see inspections they are authorized to see
+const getFilteredInspections = () => {
+  if (!currentUser) return [];
+  if (currentUser.role === 'admin' || currentUser.role === 'ceo') return inspections;
+  
+  return inspections.filter(i => {
+    if (i.type === 'leave' && currentUser.role !== 'inspector') return false;
+    
+    // Inspectors ONLY see their own inspections
+    if (currentUser.role === 'inspector') {
+      return String(i.inspector_id) === String(currentUser.id) || 
+             (i.inspector_name && i.inspector_name.toLowerCase() === currentUser.name.toLowerCase());
+    }
+    
+    // Supervisors see inspections they supervise OR unassigned ones
+    if (currentUser.role === 'supervisor') {
+      return String(i.supervisor_id) === String(currentUser.id) || 
+             (i.supervisor_name && i.supervisor_name.toLowerCase() === currentUser.name.toLowerCase()) ||
+             !i.supervisor_id;
+    }
+    
+    return false;
+  });
+};
+
   const handleNavigate = (p) => {
     setPage(p);
     setViewingInspection(null);
@@ -478,34 +504,34 @@ const syncInspectionToSupabase = async (insp) => {
           ) : viewingInspection ? (
             <InspectionDetail inspection={viewingInspection} currentUser={currentUser} onBack={() => setViewingInspection(null)} onUpdate={handleUpdateInspection} addAuditLog={addAuditLog} allInspections={inspections} />
           ) : page === "dashboard" ? (
-            currentUser.role === ROLES.CEO || currentUser.role === ROLES.ADMIN ? <CEODashboard inspections={inspections} locations={locations} auditLogs={auditLogs} currentUser={currentUser} /> :
-            currentUser.role === ROLES.SUPERVISOR ? <SupervisorDashboard inspections={inspections} users={users} currentUser={currentUser} onView={handleViewInspection} /> :
-            <InspectorDashboard inspections={inspections} users={users} currentUser={currentUser} onStartInspection={handleStartInspection} onAcceptTask={handleAcceptTask} onDeclineTask={handleDeclineTask} onRequestLeave={handleRequestLeave} />
-          ) : page === "inspections" ? <InspectionsList inspections={inspections} currentUser={currentUser} onView={handleViewInspection} onCreate={() => setShowNewModal(true)} /> 
-          : page === "report_center" ? <ReportCenter inspections={inspections} locations={locations} users={users} /> 
+            currentUser.role === ROLES.CEO || currentUser.role === ROLES.ADMIN ? <CEODashboard inspections={getFilteredInspections()} locations={locations} auditLogs={auditLogs} currentUser={currentUser} /> :
+            currentUser.role === ROLES.SUPERVISOR ? <SupervisorDashboard inspections={getFilteredInspections()} users={users} currentUser={currentUser} onView={handleViewInspection} /> :
+            <InspectorDashboard inspections={getFilteredInspections()} users={users} currentUser={currentUser} onStartInspection={handleStartInspection} onAcceptTask={handleAcceptTask} onDeclineTask={handleDeclineTask} onRequestLeave={handleRequestLeave} />
+          ) : page === "inspections" ? <InspectionsList inspections={getFilteredInspections()} currentUser={currentUser} onView={handleViewInspection} onCreate={() => setShowNewModal(true)} /> 
+          : page === "report_center" ? <ReportCenter inspections={getFilteredInspections()} locations={locations} users={users} /> 
           : page === "messages" ? <Messages users={users} currentUser={currentUser} /> 
-          : page === "alerts" ? <Alerts inspections={inspections} onView={handleViewInspection} onUpdate={handleUpdateInspection} /> 
+          : page === "alerts" ? <Alerts inspections={getFilteredInspections()} onView={handleViewInspection} onUpdate={handleUpdateInspection} /> 
           : page === "schedule" ? (
             <div>
               <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => exportToICS(inspections)}><Icon name="download" size={13} /> Export to Outlook/Google (.ics)</button>
               </div>
-              <Schedule inspections={inspections} users={users} onUpdate={handleDragUpdate} onOpenModal={() => setShowScheduleModal(true)} onReschedule={setReschedulingTask} onBulkSchedule={() => setShowBulkModal(true)} />
+              <Schedule inspections={getFilteredInspections()} users={users} onUpdate={handleDragUpdate} onOpenModal={() => setShowScheduleModal(true)} onReschedule={setReschedulingTask} onBulkSchedule={() => setShowBulkModal(true)} />
             </div>
-          ) : page === "field_map" ? <LiveMap inspections={inspections} users={users} onRefresh={async () => { return; }} refreshIntervalMs={45000} /> 
-          : page === "team" ? <Team users={users} inspections={inspections} /> 
-          : page === "monthly_report" ? <MonthlyReport inspections={inspections} locations={locations} /> 
-          : page === "reports" ? <ReportsPage inspections={inspections} locations={locations} users={users} /> 
+          ) : page === "field_map" ? <LiveMap inspections={getFilteredInspections()} users={users} onRefresh={async () => { return; }} refreshIntervalMs={45000} /> 
+          : page === "team" ? <Team users={users} inspections={getFilteredInspections()} /> 
+          : page === "monthly_report" ? <MonthlyReport inspections={getFilteredInspections()} locations={locations} /> 
+          : page === "reports" ? <ReportsPage inspections={getFilteredInspections()} locations={locations} users={users} /> 
           : page === "users" ? <UsersPage users={users} setUsers={setUsers} /> 
-          : page === "locations" ? <LocationsPage locations={locations} setLocations={setLocations} users={users} inspections={inspections} /> 
+          : page === "locations" ? <LocationsPage locations={locations} setLocations={setLocations} users={users} inspections={getFilteredInspections()} /> 
           : page === "templates" ? <TemplatesPage /> 
           : page === "audit" ? <AuditPage currentUser={currentUser} /> 
-          : page === "settings" ? <SettingsPage inspections={inspections} onDeleteInspection={handleDeleteInspection} /> 
+          : page === "settings" ? <SettingsPage inspections={getFilteredInspections()} onDeleteInspection={handleDeleteInspection} /> 
           : null}
         </div>
       </div>
       {showNewModal && <NewInspectionModal locations={locations} users={users} currentUser={currentUser} onClose={() => setShowNewModal(false)} onCreate={handleCreateInspection} />}
-      {showScheduleModal && <ScheduleModal locations={locations} users={users} inspections={inspections} onClose={() => setShowScheduleModal(false)} onCreate={handleCreateSchedule} />}
+      {showScheduleModal && <ScheduleModal locations={locations} users={users} inspections={getFilteredInspections()} onClose={() => setShowScheduleModal(false)} onCreate={handleCreateSchedule} />}
       {showBulkModal && <BulkScheduleModal locations={locations} users={users} onClose={() => setShowBulkModal(false)} onCreate={handleBulkSchedule} />}
       {reschedulingTask && <RescheduleModal inspection={reschedulingTask} users={users} onClose={() => setReschedulingTask(null)} onConfirm={handleConfirmReschedule} />}
     </div>
