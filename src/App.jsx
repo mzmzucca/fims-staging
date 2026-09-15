@@ -1,4 +1,4 @@
-cat > src/App.jsx << 'ENDOFFILE'
+
 // /src/App.jsx
 import { useState, useEffect } from "react";
 import { Icon } from "./lib/icons";
